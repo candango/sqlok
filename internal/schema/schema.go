@@ -1,9 +1,9 @@
-package sqlok
+package schema
 
 type Table struct {
 	Name   string
 	Schema string
-	Fields []Field
+	Fields []*Field
 }
 
 type Field struct {
