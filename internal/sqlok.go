@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 
+	sql "database/sql"
+
 	"github.com/candango/sqlok/internal/schema"
-	"github.com/jackc/pgx/v5"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type DatabaseLoader interface {
@@ -19,14 +21,16 @@ type DatabaseLoader interface {
 type PostgresLoader struct {
 	cString string
 	ctx     context.Context
-	conn    *pgx.Conn
+	db      *sql.DB
 	tables  []*schema.Table
+	builder SelectBuilder
 }
 
 func NewPostgresLoader(cString string, ctx context.Context) DatabaseLoader {
 	return &PostgresLoader{
 		cString: cString,
 		ctx:     ctx,
+		builder: NewSelectBuiler(),
 	}
 
 }
@@ -34,7 +38,7 @@ func NewPostgresLoader(cString string, ctx context.Context) DatabaseLoader {
 func (l *PostgresLoader) Connect() error {
 	var err error
 	l.ctx = context.Background()
-	l.conn, err = pgx.Connect(l.ctx, l.cString)
+	l.db, err = sql.Open("pgx", l.cString)
 	if err != nil {
 		return errors.New(fmt.Sprintf("Unable to connect to the database: %v\n", err))
 	}
@@ -42,7 +46,7 @@ func (l *PostgresLoader) Connect() error {
 }
 
 func (l *PostgresLoader) Disconnect() error {
-	return l.conn.Close(l.ctx)
+	return l.db.Close()
 }
 
 func (l *PostgresLoader) Load() error {
@@ -62,15 +66,18 @@ func (l *PostgresLoader) Load() error {
 }
 
 func (l *PostgresLoader) loadTables() ([]*schema.Table, error) {
-	sql := `SELECT
-			table_schema,
-			table_name
-		FROM
-			information_schema.tables
-		WHERE
-			table_type = 'BASE TABLE' AND
-			table_schema not in ('pg_catalog', 'information_schema');`
-	rows, err := l.conn.Query(l.ctx, sql)
+	l.builder.Select(
+		"table_schema", "table_name",
+	).From(
+		"information_schema.tables",
+	).Where(
+		"table_type = 'BASE TABLE'",
+	).And(
+		"table_schema not in ('pg_catalog', 'information_schema')",
+	)
+
+	rows, err := l.builder.Execute(l.ctx, l.db)
+	fmt.Println(rows)
 
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to run query : %v\n", err))
@@ -94,10 +101,17 @@ func (l *PostgresLoader) loadTables() ([]*schema.Table, error) {
 }
 
 func (l *PostgresLoader) loadFields(table *schema.Table) ([]*schema.Field, error) {
-	sql := fmt.Sprintf(`SELECT column_name, data_type
-        FROM information_schema.columns
-        WHERE table_schema = '%s' AND table_name = '%s'`, table.Schema, table.Name)
-	rows, err := l.conn.Query(l.ctx, sql)
+	l.builder.Select(
+		"column_name", "data_type",
+	).From(
+		"information_schema.columns",
+	).Where(
+		"table_schema = $1", table.Schema,
+	).And(
+		"table_name = $2", table.Name,
+	)
+
+	rows, err := l.builder.Execute(l.ctx, l.db)
 
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to run query : %v\n", err))

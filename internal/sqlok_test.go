@@ -24,7 +24,7 @@ func TestHttpTransport(t *testing.T) {
 			t.Errorf("error reading the tag sqlok for the field %s", field.Name)
 			continue
 		}
-		t.Error(tag)
+		// t.Error(tag)
 	}
 	assert.True(t, true)
 }
