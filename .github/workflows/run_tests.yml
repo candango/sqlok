@@ -12,6 +12,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - uses: ikalnytskyi/action-setup-postgres@v7
+      - name: Install postgres
+        run: |
+          psql postgresql://postgres:postgres@localhost:5432/postgres -c "SELECT 1"
+          psql service=postgres -c "SELECT 1"
+          psql -c "SELECT 1"
+        env:
+          PGSERVICE: postgres
       - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
         with:
