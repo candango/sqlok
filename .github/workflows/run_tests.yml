@@ -12,9 +12,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: ikalnytskyi/action-setup-postgres@v7
       - name: Install postgres
         run: |
+          sudo atp update
+          sudo apt install postgresql postgresql-contrib
+          sudo systemctl status postgresql
+          sudo systemclt start postgresql
           psql postgresql://postgres:postgres@localhost:5432/postgres -c "SELECT 1"
           psql service=postgres -c "SELECT 1"
           psql -c "SELECT 1"
