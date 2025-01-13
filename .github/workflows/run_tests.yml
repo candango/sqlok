@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install postgres
         run: |
-          sudo atp update
+          sudo apt update
           sudo apt install postgresql postgresql-contrib
           sudo systemctl status postgresql
           sudo systemclt start postgresql
