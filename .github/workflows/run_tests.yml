@@ -14,14 +14,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ikalnytskyi/action-setup-postgres@v7
       - name: Install postgres
+        env:
+          PGSQL_SQLOK_PASSWORD: ${{ secrets.PGSQL_SQLOK_PASSWORD }}
+          PGSERVICE: postgres
         run: |
           psql postgresql://postgres:postgres@localhost:5432/postgres -f ./scripts/postgres/roles.sql
-          psql postgresql://postgres:postgres@localhost:5432/postgres -c "\dg"
-          psql postgresql://postgres:postgres@localhost:5432/postgres -c "SELECT 1"
-          psql service=postgres -c "SELECT 1"
-          psql -c "SELECT 1"
-        env:
-          PGSERVICE: postgres
+          psql postgresql://postgres:postgres@localhost:5432/postgres -f ./scripts/postgres/database.sql
+          psql postgresql://sqlok:$PGSQL_SQLOK_PASSWORD@localhost:5432/postgres -c "SELECT 1"
       - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
         with:
