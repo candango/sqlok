@@ -20,7 +20,7 @@ jobs:
         run: |
           psql postgresql://postgres:postgres@localhost:5432/postgres -f ./scripts/postgres/roles.sql
           psql postgresql://postgres:postgres@localhost:5432/postgres -f ./scripts/postgres/database.sql
-          psql postgresql://sqlok:$PGSQL_SQLOK_PASSWORD@localhost:5432/postgres -c "SELECT 1"
+          psql "postgresql://sqlok:$PGSQL_SQLOK_PASSWORD@localhost:5432/sqlok" -c "SELECT 1"
       - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
         with:
