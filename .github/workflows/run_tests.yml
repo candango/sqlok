@@ -18,7 +18,7 @@ jobs:
           PGSQL_SQLOK_PASSWORD: ${{ secrets.PGSQL_SQLOK_PASSWORD }}
           PGSERVICE: postgres
         run: |
-          psql postgresql://postgres:postgres@localhost:5432/postgres -f ./scripts/postgres/roles.sql
+          cat ./scripts/postgres/roles.sql | sed  "s/PGSQL_SQLOK_PASSWORD/$PGSQL_SQLOK_PASSWORD/g"| psql postgresql://postgres:postgres@localhost:5432/postgres
           psql postgresql://postgres:postgres@localhost:5432/postgres -f ./scripts/postgres/database.sql
           psql "postgresql://sqlok:$PGSQL_SQLOK_PASSWORD@localhost:5432/sqlok" -c "SELECT 1"
       - name: Setup Go ${{ matrix.go-version }}

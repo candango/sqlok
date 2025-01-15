@@ -5,3 +5,4 @@ CREATE DATABASE sqlok WITH
     ENCODING = 'UTF-8';
 
 GRANT ALL ON DATABASE sqlok TO sqlok;
+GRANT ALL ON SCHEMA public TO sqlok;
