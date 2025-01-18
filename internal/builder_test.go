@@ -52,13 +52,13 @@ func TestInsertBuilder(t *testing.T) {
 	t.Run("Should insert columns from table1 with one line of values", func(t *testing.T) {
 		b.InsertInto(table1).Values(values1...)
 		sql, args := b.Build()
-		assert.Equal(t, "INSERT INTO "+table1+" VALUES($1, $2)", sql)
+		assert.Equal(t, "INSERT INTO "+table1+" VALUES($1, $2) RETURNING id", sql)
 		assert.Equal(t, values1, args)
 	})
 	t.Run("Should insert columns from table1 with columns with one line of values", func(t *testing.T) {
 		b.InsertInto(table1).Columns(columns...).Values(values1...)
 		sql, args := b.Build()
-		assert.Equal(t, "INSERT INTO "+table1+" ("+strings.Join(columns, ", ")+") VALUES($1, $2)", sql)
+		assert.Equal(t, "INSERT INTO "+table1+" ("+strings.Join(columns, ", ")+") VALUES($1, $2) RETURNING id", sql)
 		assert.Equal(t, values1, args)
 	})
 	// FIXME: Fix more than one line insert
@@ -104,19 +104,19 @@ func TestDeleteBuilder(t *testing.T) {
 
 	b := NewDeleteBuiler()
 	t.Run("Should delete from table1", func(t *testing.T) {
-		b.DeleteFrom(table1)
+		b.Delete(table1)
 		sql, _ := b.Build()
 		assert.Equal(t, "DELETE FROM "+table1, sql)
 		// assert.Equal(t, values, args)
 	})
 	t.Run("Should delete table1 and where clause and AND condition", func(t *testing.T) {
-		b.DeleteFrom(table1).Where(columns[0]+"=$1", values[0]).And(columns[1]+"=$2", values[1])
+		b.Delete(table1).Where(columns[0]+"=$1", values[0]).And(columns[1]+"=$2", values[1])
 		sql, args := b.Build()
 		assert.Equal(t, "DELETE FROM "+table1+" WHERE column1=$1 AND column2=$2", sql)
 		assert.Equal(t, values, args)
 	})
 	t.Run("Should delete table1 and where clause and OR condition", func(t *testing.T) {
-		b.DeleteFrom(table1).Where(columns[0]+"=$1", values[0]).Or(columns[1]+"=$2", values[1])
+		b.Delete(table1).Where(columns[0]+"=$1", values[0]).Or(columns[1]+"=$2", values[1])
 		sql, args := b.Build()
 		assert.Equal(t, "DELETE FROM "+table1+" WHERE column1=$1 OR column2=$2", sql)
 		assert.Equal(t, values, args)

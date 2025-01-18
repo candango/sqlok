@@ -34,9 +34,35 @@ func Or(condition ...string) string {
 	return fmt.Sprintf("%s %s", OrCondition, strings.Join(condition, " "))
 }
 
+// QueryBuilder is an interface for building SQL queries.
+// It provides a method to construct the SQL statement and its parameters.
 type QueryBuilder interface {
+
+	// Build constructs and returns the SQL query string along with its
+	// arguments.
+	// It does not execute the query but prepares it for execution.
 	Build() (string, []any)
+}
+
+// DQLExecutor is an interface for executing Data Query Language (DQL)
+// operations,
+// specifically SELECT statements, which return data sets.
+type DQLExecutor interface {
+
+	// Execute runs the constructed SQL query to fetch data from the database.
+	// It expects the query to return rows of data.
 	Execute(ctx context.Context, db *sql.DB) (*sql.Rows, error)
+}
+
+// DMLExecutor is an interface for executing Data Manipulation Language (DML)
+// operations,
+// such as INSERT, UPDATE, or DELETE, which modify data but do not return rows.
+type DMLExecutor interface {
+
+	// ExecuteDML executes a DML query that modifies data in the database.
+	// It does not return rows but provides information about the operation's
+	// outcome.
+	Execute(ctx context.Context, db *sql.DB) (sql.Result, error)
 }
 
 type queryBuilder struct {
@@ -46,6 +72,7 @@ type queryBuilder struct {
 
 type SelectBuilder interface {
 	QueryBuilder
+	DQLExecutor
 	Select(columns ...string) SelectBuilder
 	From(table string) SelectBuilder
 	Where(condition string, args ...any) SelectBuilder
@@ -185,6 +212,7 @@ func (b *selectBuilder) Execute(ctx context.Context, db *sql.DB) (*sql.Rows, err
 
 type InsertBuilder interface {
 	QueryBuilder
+	DMLExecutor
 	InsertInto(table string) InsertBuilder
 	Columns(columns ...string) InsertBuilder
 	Values(values ...any) InsertBuilder
@@ -254,24 +282,66 @@ func (b *insertBuilder) Build() (string, []any) {
 
 	sb.WriteString(strings.Join(valuesPlaceholders, ", "))
 
+	sb.WriteString(" RETURNING id")
+
 	args := allArgs
 	b.Clear()
 
 	return sb.String(), args
 }
 
-func (b *insertBuilder) Execute(ctx context.Context, db *sql.DB) (*sql.Rows, error) {
+func (b *insertBuilder) Execute(ctx context.Context, db *sql.DB) (sql.Result, error) {
 	query, args := b.Build()
 	log.Info("executing INSERT query: ", query, "  with args: ", args)
-	rows, err := db.QueryContext(ctx, query, args...)
+	if strings.Contains(query, "RETURNING id") {
+		lid := int64(0)
+		ra := int64(0)
+		rows, err := db.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("query execution failed: %v", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			err := rows.Scan(&id)
+			if err != nil {
+				return nil, fmt.Errorf("failed reading row id after the insert operation: %v", err)
+			}
+			lid = id
+			ra++
+		}
+		res := sqlokResult{0, 0}
+		if ra == 0 {
+			return res, nil
+		}
+		res = sqlokResult{lid, ra}
+		return res, nil
+	}
+	res, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query execution failed: %v", err)
 	}
-	return rows, err
+	return res, err
+}
+
+// TODO: avoid per-drive implementation, let's do the inversion of control
+// for that
+type sqlokResult struct {
+	id int64
+	ra int64
+}
+
+func (r sqlokResult) LastInsertId() (int64, error) {
+	return r.id, nil
+}
+
+func (r sqlokResult) RowsAffected() (int64, error) {
+	return r.ra, nil
 }
 
 type UpdateBuilder interface {
 	QueryBuilder
+	DMLExecutor
 	Update(table string) UpdateBuilder
 	Set(column string, value any) UpdateBuilder
 	Where(condition string, args ...any) UpdateBuilder
@@ -344,19 +414,20 @@ func (b *updateBuilder) Build() (string, []any) {
 	return sb.String(), args
 }
 
-func (b *updateBuilder) Execute(ctx context.Context, db *sql.DB) (*sql.Rows, error) {
+func (b *updateBuilder) Execute(ctx context.Context, db *sql.DB) (sql.Result, error) {
 	query, args := b.Build()
 	log.Info("executing UPDATE query: ", query, "  with args: ", args)
-	rows, err := db.QueryContext(ctx, query, args...)
+	res, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query execution failed: %v", err)
 	}
-	return rows, err
+	return res, err
 }
 
 type DeleteBuilder interface {
 	QueryBuilder
-	DeleteFrom(table string) DeleteBuilder
+	DMLExecutor
+	Delete(table string) DeleteBuilder
 	Where(condition string, args ...any) DeleteBuilder
 	And(condition string, args ...any) DeleteBuilder
 	Or(condition string, args ...any) DeleteBuilder
@@ -374,7 +445,7 @@ func NewDeleteBuiler() DeleteBuilder {
 	return b
 }
 
-func (b *deleteBuilder) DeleteFrom(table string) DeleteBuilder {
+func (b *deleteBuilder) Delete(table string) DeleteBuilder {
 	b.table = table
 	return b
 }
@@ -416,12 +487,12 @@ func (b *deleteBuilder) Build() (string, []any) {
 	return sb.String(), args
 }
 
-func (b *deleteBuilder) Execute(ctx context.Context, db *sql.DB) (*sql.Rows, error) {
+func (b *deleteBuilder) Execute(ctx context.Context, db *sql.DB) (sql.Result, error) {
 	query, args := b.Build()
 	log.Info("executing DELETE query: ", query, "  with args: ", args)
-	rows, err := db.QueryContext(ctx, query, args...)
+	res, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query execution failed: %v", err)
 	}
-	return rows, err
+	return res, err
 }
