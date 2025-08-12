@@ -16,7 +16,7 @@ type User struct {
 func TestHttpTransport(t *testing.T) {
 	user := User{}
 	userType := reflect.TypeOf(user)
-	for i := 0; i < userType.NumField(); i++ {
+	for i := range userType.NumField() {
 		field := userType.Field(i)
 		tag := field.Tag.Get("sqlok")
 
