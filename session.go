@@ -3,7 +3,9 @@ package sqlok
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 )
 
 var ErrIdentityConflict = errors.New("identity map conflict: another object with the same ID already exists in the session")
@@ -26,7 +28,7 @@ type Session struct {
 	pending []any
 }
 
-// NewSession initializes a new Unit of Work with empty maps to prevent panics.
+// NewSession initializes a new Unit of Work with empty maps.
 func NewSession(db *sql.DB) *Session {
 	return &Session{
 		db:          db,
@@ -73,43 +75,83 @@ func (s *Session) Add(ent any) error {
 	return nil
 }
 
-// getPrimaryKey uses recursion to find the field tagged with 'pk'
-func (s *Session) getPrimaryKey(ent any) any {
-	v := reflect.ValueOf(ent).Elem()
-	return s.findPK(v)
+// Load retrieves an entity of type T by its primary key from the session's identity map.
+// If the entity is not found in the session, it returns nil, nil for now.
+func Load[T any](s *Session, id any) (*T, error) {
+	var t T
+	reflectType := reflect.TypeOf(t)
+
+	// Check the Identity Map first
+	if typeMap, ok := s.identityMap[reflectType]; ok {
+		if existing, found := typeMap[id]; found {
+			return existing.(*T), nil
+		}
+	}
+
+	// TODO: Future - Database lookup using Mapper and Builder
+	return nil, nil
 }
 
-// findPK recursively searches for the field tagged with 'pk' and handles pointers.
-func (s *Session) findPK(v reflect.Value) any {
+// getPrimaryKey scans for all fields tagged with 'pk' and returns a single or composite identity.
+func (s *Session) getPrimaryKey(ent any) any {
+	v := reflect.ValueOf(ent).Elem()
+	pks := s.collectPKs(v)
+
+	if len(pks) == 0 {
+		return nil
+	}
+
+	// Simple PK: Return the single value (int, string, etc.)
+	if len(pks) == 1 {
+		return pks[0]
+	}
+
+	// Composite PK: Build a unique string key for the identity map.
+	var sb strings.Builder
+	sb.WriteString("composite:")
+	for i, pk := range pks {
+		if i > 0 {
+			sb.WriteString("|")
+		}
+		sb.WriteString(fmt.Sprintf("%v", pk))
+	}
+	return sb.String()
+}
+
+// collectPKs recursively gathers all field values marked with 'pk'.
+func (s *Session) collectPKs(v reflect.Value) []any {
+	var pks []any
 	t := v.Type()
 	for i := range t.NumField() {
 		field := t.Field(i)
 		fieldVal := v.Field(i)
 
-		// Recursive check for embedded structs (Composition)
+		// Support for embedded structs (Composition)
 		if field.Anonymous && field.Type.Kind() == reflect.Struct {
-			if pk := s.findPK(fieldVal); pk != nil {
-				return pk
-			}
+			pks = append(pks, s.collectPKs(fieldVal)...)
+			continue
 		}
 
-		// Look for the short 'pk' tag
 		if tag := field.Tag.Get("sqlok"); tag == "pk" {
-			// Pointer logic: if pointer is nil, ID is unset.
-			if fieldVal.Kind() == reflect.Ptr {
-				if fieldVal.IsNil() {
-					return nil
-				}
-				return fieldVal.Elem().Interface()
+			val := s.extractValue(fieldVal)
+			if val != nil {
+				pks = append(pks, val)
 			}
-
-			// Value logic: if IsZero, ID is unset.
-			if fieldVal.IsZero() {
-				return nil
-			}
-
-			return fieldVal.Interface()
 		}
 	}
-	return nil
+	return pks
+}
+
+// extractValue handles pointer vs value logic for PK fields.
+func (s *Session) extractValue(v reflect.Value) any {
+	if v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return nil
+		}
+		return v.Elem().Interface()
+	}
+	if v.IsZero() {
+		return nil
+	}
+	return v.Interface()
 }

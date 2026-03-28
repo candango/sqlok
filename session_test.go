@@ -21,6 +21,12 @@ type TestPointerUser struct {
 	Name string
 }
 
+type TestCompositeUser struct {
+	OrgId  int `sqlok:"pk"`
+	UserId int `sqlok:"pk"`
+	Name   string
+}
+
 func TestSession_Add(t *testing.T) {
 	s := NewSession(nil)
 
@@ -43,7 +49,6 @@ func TestSession_Add(t *testing.T) {
 	})
 
 	t.Run("Should fail on identity conflict", func(t *testing.T) {
-		// Reset session for clean test
 		s = NewSession(nil)
 		user1 := &TestUser{TestUserBase: TestUserBase{Id: 10}, Name: "User 1"}
 		user2 := &TestUser{TestUserBase: TestUserBase{Id: 10}, Name: "User 2"}
@@ -69,5 +74,45 @@ func TestSession_Add(t *testing.T) {
 		err = s.Add(userNil)
 		assert.NoError(t, err)
 		assert.Contains(t, s.pending, userNil)
+	})
+
+	t.Run("Should handle composite PK correctly", func(t *testing.T) {
+		s = NewSession(nil)
+		user := &TestCompositeUser{OrgId: 1, UserId: 100, Name: "Joint User"}
+		err := s.Add(user)
+		assert.NoError(t, err)
+
+		reflectType := reflect.TypeOf(TestCompositeUser{})
+		compositeKey := "composite:1|100"
+		assert.Equal(t, user, s.identityMap[reflectType][compositeKey])
+	})
+}
+
+func TestSession_Load(t *testing.T) {
+	s := NewSession(nil)
+	user := &TestUser{TestUserBase: TestUserBase{Id: 50}, Name: "Database User"}
+	s.Add(user)
+
+	t.Run("Should load existing object from identity map", func(t *testing.T) {
+		loaded, err := Load[TestUser](s, 50)
+		assert.NoError(t, err)
+		assert.NotNil(t, loaded)
+		assert.Equal(t, user, loaded)
+		assert.Equal(t, "Database User", loaded.Name)
+	})
+
+	t.Run("Should load existing composite object from identity map", func(t *testing.T) {
+		comp := &TestCompositeUser{OrgId: 1, UserId: 200, Name: "Comp User"}
+		s.Add(comp)
+
+		loaded, err := Load[TestCompositeUser](s, "composite:1|200")
+		assert.NoError(t, err)
+		assert.Equal(t, comp, loaded)
+	})
+
+	t.Run("Should return nil when object not in session", func(t *testing.T) {
+		loaded, err := Load[TestUser](s, 999)
+		assert.NoError(t, err)
+		assert.Nil(t, loaded)
 	})
 }
