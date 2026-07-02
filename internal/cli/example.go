@@ -57,9 +57,9 @@ to quickly create a Cobra application.`,
 			Description: "description",
 		}
 
-		ibu := sqlok.NewInsertBuiler()
-		dbu := sqlok.NewDeleteBuiler()
-		sbu := sqlok.NewSelectBuiler()
+		ibu := sqlok.NewInsertBuilder()
+		dbu := sqlok.NewDeleteBuilder()
+		sbu := sqlok.NewSelectBuilder()
 		ubu := sqlok.NewUpdateBuilder()
 
 		ibu.InsertInto(
@@ -67,7 +67,7 @@ to quickly create a Cobra application.`,
 		).Columns(
 			"name",
 			"description",
-		).Values(user.Name, user.Description)
+		).Values([]any{user.Name, user.Description})
 
 		res, err := ibu.Execute(ctx, db)
 
@@ -98,7 +98,7 @@ to quickly create a Cobra application.`,
 
 		recUser := &User{}
 
-		sbu.Select("*").From("auser").Where("id = $1", user.Id)
+		sqlok.Select("*").From("auser").Where("id = $1", user.Id)
 		rows, err := sbu.Execute(ctx, db)
 		if err != nil {
 			log.Fatalf("fail to select: %v\n", err)

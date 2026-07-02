@@ -4,7 +4,10 @@ A Go library for PostgreSQL schema management and SQL query building.
 
 ## Overview
 
-**sqlok** provides a fluent, type-safe API for building SQL queries and managing PostgreSQL schemas. It combines a query builder pattern with reflection-based schema introspection, making it easy to write database operations without manual SQL string concatenation.
+**sqlok** provides a fluent, type-safe API for building SQL queries and
+managing PostgreSQL schemas. It combines a query builder pattern with
+reflection-based schema introspection, making it easy to write database
+operations without manual SQL string concatenation.
 
 ## Features
 

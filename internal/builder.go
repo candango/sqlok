@@ -9,9 +9,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// JoinType represents the type of SQL join operation.
 type JoinType string
 
 const (
+	CrossJoin JoinType = "CROSS JOIN"
 	InnerJoin JoinType = "INNER JOIN"
 	Join      JoinType = "JOIN"
 	LeftJoin  JoinType = "LEFT JOIN"
@@ -19,6 +21,7 @@ const (
 	RightJoin JoinType = "RIGHT JOIN"
 )
 
+// ConditionType represents the type of SQL condition operation.
 type ConditionType string
 
 const (
@@ -26,10 +29,12 @@ const (
 	OrCondition  ConditionType = "OR"
 )
 
+// And constructs an SQL condition that combines multiple conditions with
 func And(condition ...string) string {
 	return fmt.Sprintf("%s %s", AndCondition, strings.Join(condition, " "))
 }
 
+// Or constructs an SQL condition that combines multiple conditions with
 func Or(condition ...string) string {
 	return fmt.Sprintf("%s %s", OrCondition, strings.Join(condition, " "))
 }
@@ -65,11 +70,13 @@ type DMLExecutor interface {
 	Execute(ctx context.Context, db *sql.DB) (sql.Result, error)
 }
 
+// queryBuilder is a concrete implementation of the QueryBuilder interface.
 type queryBuilder struct {
 	query string
 	args  []any
 }
 
+// SelectBuilder is an interface for building SQL SELECT queries.
 type SelectBuilder interface {
 	QueryBuilder
 	DQLExecutor
@@ -102,7 +109,11 @@ type joinInfo struct {
 	on string
 }
 
-func NewSelectBuiler() SelectBuilder {
+func Select(columns ...string) SelectBuilder {
+	return NewSelectBuilder().Select(columns...)
+}
+
+func NewSelectBuilder() SelectBuilder {
 	b := &selectBuilder{}
 	b.Clear()
 	return b
@@ -174,7 +185,7 @@ func (b *selectBuilder) Build() (string, []any) {
 	sb.WriteString(b.fromTable)
 
 	for _, join := range b.joins {
-		sb.WriteString(fmt.Sprintf(" %s %s ON %s ", join.joinType, join.table, join.on))
+		fmt.Fprintf(&sb, " %s %s ON %s ", join.joinType, join.table, join.on)
 	}
 
 	// TODO: Implement the AND/OR properly
@@ -189,11 +200,11 @@ func (b *selectBuilder) Build() (string, []any) {
 	}
 
 	if b.limit > 0 {
-		sb.WriteString(fmt.Sprintf(" LIMIT %d ", b.limit))
+		fmt.Fprintf(&sb, " LIMIT %d ", b.limit)
 	}
 
 	if b.offset > 0 {
-		sb.WriteString(fmt.Sprintf(" LIMIT %d ", b.offset))
+		fmt.Fprintf(&sb, " OFFSET %d ", b.offset)
 	}
 	args := b.whereArgs
 	b.Clear()
@@ -215,17 +226,19 @@ type InsertBuilder interface {
 	DMLExecutor
 	InsertInto(table string) InsertBuilder
 	Columns(columns ...string) InsertBuilder
-	Values(values ...any) InsertBuilder
+	Values(values ...[]any) InsertBuilder
+	Returning(columns ...string) InsertBuilder
 }
 
 type insertBuilder struct {
-	table   string
-	columns []string
-	values  [][]any
-	args    []any
+	table     string
+	columns   []string
+	values    [][]any
+	returning []string
+	args      []any
 }
 
-func NewInsertBuiler() InsertBuilder {
+func NewInsertBuilder() InsertBuilder {
 	b := &insertBuilder{}
 	b.Clear()
 	return b
@@ -241,8 +254,15 @@ func (b *insertBuilder) Columns(columns ...string) InsertBuilder {
 	return b
 }
 
-func (b *insertBuilder) Values(values ...any) InsertBuilder {
-	b.values = append(b.values, values)
+func (b *insertBuilder) Values(values ...[]any) InsertBuilder {
+	for _, row := range values {
+		b.values = append(b.values, row)
+	}
+	return b
+}
+
+func (b *insertBuilder) Returning(returning ...string) InsertBuilder {
+	b.returning = returning
 	return b
 }
 
@@ -250,6 +270,7 @@ func (b *insertBuilder) Clear() InsertBuilder {
 	b.table = ""
 	b.columns = []string{}
 	b.values = [][]any{}
+	b.returning = []string{}
 	return b
 }
 
@@ -267,22 +288,24 @@ func (b *insertBuilder) Build() (string, []any) {
 	sb.WriteString(" VALUES")
 	var allArgs []any
 	var valuesPlaceholders []string
-	for i, valueSet := range b.values {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
+	pCount := 0 // placeholder count
+	for _, valueSet := range b.values {
 		placeholders := make([]string, len(valueSet))
-		for j := range valueSet {
-			// TODO: WHAT!!!!????
-			placeholders[j] = fmt.Sprintf("$%v", j+1)
-			allArgs = append(allArgs, valueSet[j])
+		for vPos := range valueSet {
+			placeholders[vPos] = fmt.Sprintf("$%v", pCount+1)
+			pCount++
+			allArgs = append(allArgs, valueSet[vPos])
 		}
-		valuesPlaceholders = append(valuesPlaceholders, "("+strings.Join(placeholders, ", ")+")")
+		valuesPlaceholders = append(valuesPlaceholders,
+			"("+strings.Join(placeholders, ", ")+")")
 	}
 
 	sb.WriteString(strings.Join(valuesPlaceholders, ", "))
 
-	sb.WriteString(" RETURNING id")
+	if len(b.returning) > 0 {
+		sb.WriteString(" RETURNING ")
+		sb.WriteString(strings.Join(b.returning, ", "))
+	}
 
 	args := allArgs
 	b.Clear()
@@ -354,6 +377,10 @@ type updateBuilder struct {
 	set   []string
 	where []string
 	args  []any
+}
+
+func Update(table string) UpdateBuilder {
+	return NewUpdateBuilder().Update(table)
 }
 
 func NewUpdateBuilder() UpdateBuilder {
@@ -439,7 +466,7 @@ type deleteBuilder struct {
 	args  []any
 }
 
-func NewDeleteBuiler() DeleteBuilder {
+func NewDeleteBuilder() DeleteBuilder {
 	b := &deleteBuilder{}
 	b.Clear()
 	return b
