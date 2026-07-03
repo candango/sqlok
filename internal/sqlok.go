@@ -2,54 +2,36 @@ package sqlok
 
 import (
 	"context"
-	"errors"
+	"database/sql"
 	"fmt"
 
-	sql "database/sql"
-
 	"github.com/candango/sqlok/internal/schema"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type DatabaseLoader interface {
-	Connect() error
-	Disconnect() error
 	Load() error
 	Tables() []*schema.Table
 }
 
-type PostgresLoader struct {
-	cString string
+type Loader struct {
 	ctx     context.Context
 	db      *sql.DB
 	tables  []*schema.Table
 	builder SelectBuilder
 }
 
-func NewPostgresLoader(cString string, ctx context.Context) DatabaseLoader {
-	return &PostgresLoader{
-		cString: cString,
+func NewLoader(db *sql.DB, ctx context.Context) DatabaseLoader {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &Loader{
+		db:      db,
 		ctx:     ctx,
-		builder: NewSelectBuiler(),
+		builder: NewSelectBuilder(),
 	}
-
 }
 
-func (l *PostgresLoader) Connect() error {
-	var err error
-	l.ctx = context.Background()
-	l.db, err = sql.Open("pgx", l.cString)
-	if err != nil {
-		return errors.New(fmt.Sprintf("Unable to connect to the database: %v\n", err))
-	}
-	return nil
-}
-
-func (l *PostgresLoader) Disconnect() error {
-	return l.db.Close()
-}
-
-func (l *PostgresLoader) Load() error {
+func (l *Loader) Load() error {
 	tables, err := l.loadTables()
 	if err != nil {
 		return err
@@ -65,7 +47,7 @@ func (l *PostgresLoader) Load() error {
 	return nil
 }
 
-func (l *PostgresLoader) loadTables() ([]*schema.Table, error) {
+func (l *Loader) loadTables() ([]*schema.Table, error) {
 	l.builder.Select(
 		"table_schema", "table_name",
 	).From(
@@ -77,30 +59,38 @@ func (l *PostgresLoader) loadTables() ([]*schema.Table, error) {
 	)
 
 	rows, err := l.builder.Execute(l.ctx, l.db)
-	fmt.Println(rows)
 
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Failed to run query : %v\n", err))
+		return nil, fmt.Errorf("Failed to run query : %v\n", err)
 	}
 
 	defer rows.Close()
+	// ctypes, err := rows.ColumnTypes()
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to process column types : %v\n", err)
+	// }
+	// columns, err := rows.Columns()
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to process columns : %v\n", err)
+	// }
 
 	tables := []*schema.Table{}
 	for rows.Next() {
 		table := &schema.Table{}
-		if err := rows.Scan(&table.Schema, &table.Name); err != nil {
-			return nil, errors.New(fmt.Sprintf("Failed to scan row: %v", err))
+		name := table.Name()
+		if err := rows.Scan(&table.Schema, &name); err != nil {
+			return nil, fmt.Errorf("Failed to scan row: %v", err)
 		}
 
 		tables = append(tables, table)
 	}
 	if err = rows.Err(); err != nil {
-		return nil, errors.New(fmt.Sprintf("Failed reading rows: %v", err))
+		return nil, fmt.Errorf("Failed reading rows: %v", err)
 	}
 	return tables, nil
 }
 
-func (l *PostgresLoader) loadFields(table *schema.Table) ([]*schema.Field, error) {
+func (l *Loader) loadFields(table *schema.Table) ([]*schema.Field, error) {
 	l.builder.Select(
 		"column_name", "data_type",
 	).From(
@@ -114,7 +104,7 @@ func (l *PostgresLoader) loadFields(table *schema.Table) ([]*schema.Field, error
 	rows, err := l.builder.Execute(l.ctx, l.db)
 
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Failed to run query : %v\n", err))
+		return nil, fmt.Errorf("Failed to run query : %v\n", err)
 	}
 
 	defer rows.Close()
@@ -122,17 +112,18 @@ func (l *PostgresLoader) loadFields(table *schema.Table) ([]*schema.Field, error
 	fields := []*schema.Field{}
 	for rows.Next() {
 		field := &schema.Field{}
-		if err := rows.Scan(&field.Name, &field.Type); err != nil {
-			return nil, errors.New(fmt.Sprintf("Failed to scan row: %v", err))
+		name := field.Name()
+		if err := rows.Scan(&name, &field.Type); err != nil {
+			return nil, fmt.Errorf("Failed to scan row: %v", err)
 		}
 		fields = append(fields, field)
 	}
 	if err = rows.Err(); err != nil {
-		return nil, errors.New(fmt.Sprintf("Failed reading rows: %v", err))
+		return nil, fmt.Errorf("Failed reading rows: %v", err)
 	}
 	return fields, nil
 }
 
-func (l *PostgresLoader) Tables() []*schema.Table {
+func (l *Loader) Tables() []*schema.Table {
 	return l.tables
 }

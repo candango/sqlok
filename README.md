@@ -47,7 +47,7 @@ sql, args := sqlok.Select("id", "name", "email").
 // args: []any{1}
 
 // INSERT query
-sql, args := sqlok.NewInsertBuiler().
+sql, args := sqlok.NewInsertBuilder().
   InsertInto("users").
   Columns("name", "email").
   Values("John", "john@example.com").
