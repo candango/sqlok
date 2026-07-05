@@ -98,6 +98,57 @@ Use Columns for the SELECT columns clause in sqlok, but define it broadly as
 selected expressions, not only physical table columns.
 ```
 
+### SELECT FROM behavior and cartesian products
+
+SQLAlchemy allows multiple FROM elements in a SELECT. Calling `select_from()`
+with separate tables, or otherwise allowing unrelated tables to enter the FROM
+set, can produce SQL shaped like:
+
+```sql
+FROM users, orders
+```
+
+That form is a cartesian product unless the tables are connected by join or
+WHERE criteria. SQLAlchemy 1.4+ includes FROM-linting that warns when a SELECT
+contains unlinked FROM elements that imply an accidental cartesian product.
+
+The preferred SQLAlchemy shape for related tables is an explicit join:
+
+```python
+select(user_table.c.id, address_table.c.email_address).join(
+    address_table,
+    user_table.c.id == address_table.c.user_id,
+)
+```
+
+or an explicit joined FROM object:
+
+```python
+select(...).select_from(
+    user_table.join(address_table, user_table.c.id == address_table.c.user_id)
+)
+```
+
+Intentional cartesian products should be explicit, for example by joining on
+`true()`, so the cartesian shape is deliberate rather than accidental.
+
+Sources:
+
+- SQLAlchemy 1.4 migration notes on built-in FROM linting and cartesian product
+  warnings:
+  https://docs.sqlalchemy.org/en/21/changelog/migration_14.html
+- SQLAlchemy Core selectable documentation for `Select.select_from()`,
+  `Select.join()`, and `Select.join_from()`:
+  https://docs.sqlalchemy.org/en/21/core/selectable.html
+
+Research conclusion:
+
+```text
+Do not make accidental cartesian products the easy path in sqlok. Model a
+primary SELECT source first, add explicit joins later, and require any cross join
+or multi-source cartesian behavior to be explicit.
+```
+
 ### WHERE vocabulary: criteria, not Predicate
 
 SQLAlchemy does not use `Predicate` as the primary statement-field vocabulary.

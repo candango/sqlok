@@ -36,14 +36,28 @@ type SelectColumnNode interface {
 	Expr() Node
 }
 
+// TableRefNode represents a reference to a SQL table or relation source.
+type TableRefNode interface {
+	Node
+
+	// Name returns the referenced table name.
+	Name() string
+
+	// Schema returns the optional schema qualifier.
+	Schema() string
+}
+
 // Visitor defines operations that can be applied to SQL semantic tree nodes.
 type Visitor interface {
+	// VisitColumnRef visits a SQL column reference node.
+	VisitColumnRef(ColumnRefNode) error
+
 	// VisitSelect visits a SELECT statement root node.
 	VisitSelect(SelectNode) error
 
 	// VisitSelectColumn visits one projected item in a SELECT columns clause.
 	VisitSelectColumn(SelectColumnNode) error
 
-	// VisitColumnRef visits a SQL column reference node.
-	VisitColumnRef(ColumnRefNode) error
+	// VisitTableRef visits a SQL table reference node.
+	VisitTableRef(TableRefNode) error
 }

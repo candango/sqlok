@@ -29,6 +29,10 @@ func (v *fakeVisitor) VisitColumnRef(s sst.ColumnRefNode) error {
 	return nil
 }
 
+func (v *fakeVisitor) VisitTableRef(s sst.TableRefNode) error {
+	return nil
+}
+
 type fakeExpr struct{}
 
 func (e *fakeExpr) Accept(v sst.Visitor) error {
@@ -58,6 +62,10 @@ func (v *traversingVisitor) VisitSelectColumn(s sst.SelectColumnNode) error {
 
 func (v *traversingVisitor) VisitColumnRef(s sst.ColumnRefNode) error {
 	v.visitedColumnRefs++
+	return nil
+}
+
+func (v *traversingVisitor) VisitTableRef(s sst.TableRefNode) error {
 	return nil
 }
 

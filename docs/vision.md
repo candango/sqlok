@@ -82,6 +82,14 @@ and SQLAlchemy direction (`_raw_columns`, `selected_columns`) while remaining
 ergonomic. In `sqlok`, `Columns` means the selected expressions in the SELECT
 columns clause, not only physical table columns.
 
+SELECT source handling should follow the SQLAlchemy 1.4+ safety direction:
+advanced multi-source SELECT shapes may be allowed, but accidental cartesian
+products must not be silent. The normal path should be a primary source plus
+explicit joins. If the AST contains disconnected FROM elements, compilation or
+validation should emit a diagnostic warning. Intentional cross joins or other
+cartesian shapes must be represented explicitly so the query author's intent is
+clear.
+
 DML roots should represent their own operation-specific shape:
 - `Insert`: target table, values, optional insert-from-select, returning
 - `Update`: target table, values/set clauses, where criteria, returning

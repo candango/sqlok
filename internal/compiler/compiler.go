@@ -55,3 +55,14 @@ func (c *Compiler) VisitColumnRef(column sst.ColumnRefNode) error {
 	c.parts = append(c.parts, strings.Join(parts, "."))
 	return nil
 }
+
+// VisitTableRef renders a qualified or unqualified SQL table reference.
+func (c *Compiler) VisitTableRef(table sst.TableRefNode) error {
+	parts := make([]string, 0, 2)
+	if table.Schema() != "" {
+		parts = append(parts, table.Schema())
+	}
+	parts = append(parts, table.Name())
+	c.parts = append(c.parts, strings.Join(parts, "."))
+	return nil
+}
