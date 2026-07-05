@@ -5,10 +5,10 @@ import (
 )
 
 type Select struct {
-	columns []sst.Node
+	columns []sst.SelectColumnNode
 }
 
-func NewSelect(columns ...sst.Node) *Select {
+func NewSelect(columns ...sst.SelectColumnNode) *Select {
 	s := &Select{
 		columns: columns,
 	}
@@ -19,6 +19,6 @@ func (s *Select) Accept(v sst.Visitor) error {
 	return v.VisitSelect(s)
 }
 
-func (s *Select) Columns() []sst.Node {
+func (s *Select) Columns() []sst.SelectColumnNode {
 	return s.columns
 }

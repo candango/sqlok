@@ -6,15 +6,15 @@ type Node interface {
 
 type SelectNode interface {
 	Node
-	Columns() []Node
+	Columns() []SelectColumnNode
 }
 
 type SelectColumnNode interface {
 	Node
-	Name() string
+	Expr() Node
 }
 
 type Visitor interface {
 	VisitSelect(SelectNode) error
-	VisitColumn(SelectColumnNode) error
+	VisitSelectColumn(SelectColumnNode) error
 }
