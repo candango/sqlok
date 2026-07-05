@@ -162,6 +162,21 @@ args []any
 
 This keeps query generation separate from query execution.
 
+Statement values must be represented as bind parameters, not concatenated into
+SQL text. User-controlled values should flow into `args`, while the compiler and
+dialect decide the placeholder syntax (`$1`, `?`, `:name`, etc.).
+
+Security direction:
+- never interpolate user values directly into SQL strings
+- model bind/literal values as AST nodes before compilation
+- keep identifier rendering separate from value binding
+- let dialects own placeholder formatting and identifier quoting rules
+- add tests that prove generated SQL uses placeholders and carries values in
+  `args`
+
+This is the main SQL injection boundary for `sqlok`: the AST and compiler must
+make the safe path the default path.
+
 ## Research basis
 
 This vision is informed by SQLAlchemy Core's statement/expression architecture,
