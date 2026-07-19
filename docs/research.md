@@ -337,3 +337,43 @@ sqlalchemy/sql/
 
 This supports a `sqlok` design where AST statement roots and the compiler are
 separate packages/modules.
+
+## SELECT FROM sources and JOIN nodes
+
+SQLAlchemy models SELECT sources through a `FromClause` abstraction. Tables,
+aliases, subqueries, and joins can appear as FROM elements, while an explicit
+join is represented by a `Join` object rather than as an unrelated table in a
+flat source list.
+
+A representative shape is:
+
+```python
+stmt = (
+    select(users.c.id)
+    .select_from(users)
+    .join(orders, orders.c.user_id == users.c.id)
+)
+```
+
+The architectural distinction is:
+
+```text
+Select
+├── FROM elements: FromClause
+└── JOIN tree: Join
+```
+
+`select_from()` establishes an explicit source. `join()` adds an explicit join
+relationship and preserves its left side, right side, and join condition. This
+is different from adding disconnected FROM elements, which can produce an
+accidental cartesian product and is subject to SQLAlchemy's FROM-linting
+behavior.
+
+Research conclusion for `sqlok`:
+
+```text
+Start Select with one primary Source() and model future joins as explicit Join
+nodes. Do not represent joins as an undifferentiated Sources() slice.
+```
+
+Source: [SQLAlchemy Selectable documentation](https://docs.sqlalchemy.org/en/20/core/selectable.html).

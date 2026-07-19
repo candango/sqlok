@@ -23,7 +23,8 @@ type Compiler struct {
 	args  []any
 }
 
-// VisitSelect renders a SELECT statement and visits its projected columns.
+// VisitSelect renders a SELECT statement and visits its projected columns
+// and primary FROM source.
 func (c *Compiler) VisitSelect(stmt sst.SelectNode) error {
 	c.parts = append(c.parts, "SELECT ")
 	for i, column := range stmt.Columns() {
@@ -31,6 +32,12 @@ func (c *Compiler) VisitSelect(stmt sst.SelectNode) error {
 			c.parts = append(c.parts, ", ")
 		}
 		if err := column.Accept(c); err != nil {
+			return err
+		}
+	}
+	if source := stmt.Source(); source != nil {
+		c.parts = append(c.parts, " FROM ")
+		if err := source.Accept(c); err != nil {
 			return err
 		}
 	}

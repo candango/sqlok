@@ -26,6 +26,9 @@ type SelectNode interface {
 
 	// Columns returns the projected columns in this SELECT statement.
 	Columns() []SelectColumnNode
+
+	// Source returns the primary FROM source.
+	Source() TableRefNode
 }
 
 // SelectColumnNode represents one projected item in a SELECT columns clause.

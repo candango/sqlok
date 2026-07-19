@@ -34,3 +34,17 @@ func TestCompileSelectWithMultipleColumnRefs(t *testing.T) {
 	assert.Equal(t, "SELECT users.id, users.name", sql)
 	assert.Empty(t, args)
 }
+
+func TestCompileSelectWithFromSource(t *testing.T) {
+	stmt := dql.NewSelect(
+		dql.NewSelectColumn(elements.NewColumnRef("users", "id")),
+	).From(
+		elements.NewTableRef("users", elements.WithTableSchema("public")),
+	)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM public.users", sql)
+	assert.Empty(t, args)
+}

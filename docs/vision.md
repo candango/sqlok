@@ -308,16 +308,19 @@ Things that do not belong in core:
 
 ## Current direction
 
-Current builder code started as string construction. The next architectural step is to introduce a minimal AST path and gradually move builder behavior toward:
+The initial SELECT AST path now exists for projected columns and one primary
+source, with compilation into SQL and bound arguments. The public builder still
+starts as string construction and has not yet been connected to the AST path.
+The next architectural step is to move builder behavior toward:
 
 ```text
 builder method calls → AST nodes → compiler output
 ```
 
-The learning path should start with statement roots before attempting full SQL coverage:
-- define `Select` as the root of a SELECT statement
-- define minimal child nodes for projection(s), table source, and where criteria
-- compile `Select` into SQL + args
+The learning path should continue from the current SELECT slice:
+- connect the public builder to the `Select` statement root
+- add explicit joins and disconnected-FROM diagnostics
+- add WHERE criteria and bind parameters
 - then define `Insert`, `Update`, and `Delete` as separate statement roots
 - compile each root through the same compiler boundary
 

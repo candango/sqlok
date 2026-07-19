@@ -142,11 +142,14 @@ focused files such as `column_ref.go`, `table_ref.go`, `literal.go`, and
 
 ## Current SELECT sequence
 
-The implementation sequence currently adopted is:
+The first three slices are implemented:
 
 1. model selected columns;
 2. model one primary SELECT source with `TableRef`;
-3. compile the `FROM` clause;
+3. compile the `FROM` clause.
+
+The next slices are:
+
 4. design explicit joins and disconnected-FROM diagnostics;
 5. add WHERE criteria and bind parameters.
 
