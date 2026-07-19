@@ -14,18 +14,29 @@ type ColumnRef struct {
 	table  string
 }
 
-// NewColumnRef creates a column reference qualified by table name.
-func NewColumnRef(table string, name string) *ColumnRef {
-	return &ColumnRef{
+// ColumnRefOption configures a column reference during construction.
+type ColumnRefOption func(*ColumnRef)
+
+// NewColumnRef creates a column reference qualified by table name and applies
+// the provided construction options.
+func NewColumnRef(tbl string, name string, options ...ColumnRefOption) *ColumnRef {
+	c := &ColumnRef{
 		name:  name,
-		table: table,
+		table: tbl,
 	}
+
+	for _, option := range options {
+		option(c)
+	}
+
+	return c
 }
 
-// WithSchema qualifies the column reference with a schema name.
-func (c *ColumnRef) WithSchema(schema string) *ColumnRef {
-	c.schema = schema
-	return c
+// WithColumnSchema qualifies a column reference with a schema name.
+func WithColumnSchema(schema string) ColumnRefOption {
+	return func(c *ColumnRef) {
+		c.schema = schema
+	}
 }
 
 // Accept dispatches the column reference node to the provided visitor.
@@ -46,4 +57,50 @@ func (c *ColumnRef) Schema() string {
 // Table returns the table qualifier.
 func (c *ColumnRef) Table() string {
 	return c.table
+}
+
+// TableRef represents a reference to a SQL table, optionally qualified by a
+// schema.
+type TableRef struct {
+	name   string
+	schema string
+}
+
+// TableRefOption configures a table reference during construction.
+type TableRefOption func(*TableRef)
+
+// NewTableRef creates a table reference with the provided table name and
+// applies the provided construction options.
+func NewTableRef(name string, options ...TableRefOption) *TableRef {
+	tr := &TableRef{
+		name: name,
+	}
+
+	for _, option := range options {
+		option(tr)
+	}
+
+	return tr
+}
+
+// WithTableSchema qualifies a table reference with a schema name.
+func WithTableSchema(schema string) TableRefOption {
+	return func(tr *TableRef) {
+		tr.schema = schema
+	}
+}
+
+// Accept dispatches the table reference node to the provided visitor.
+func (tr *TableRef) Accept(v sst.Visitor) error {
+	return v.VisitTableRef(tr)
+}
+
+// Name returns the referenced table name.
+func (tr *TableRef) Name() string {
+	return tr.name
+}
+
+// Schema returns the optional schema qualifier.
+func (tr *TableRef) Schema() string {
+	return tr.schema
 }

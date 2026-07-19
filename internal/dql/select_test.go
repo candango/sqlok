@@ -84,7 +84,7 @@ func TestSelectAcceptVisitsSelect(t *testing.T) {
 
 func TestSelectColumnRefChainCanBeVisited(t *testing.T) {
 	visitor := &traversingVisitor{}
-	columnRef := elements.NewColumnRef("users", "id").WithSchema("public")
+	columnRef := elements.NewColumnRef("users", "id", elements.WithColumnSchema("public"))
 	selectNode := NewSelect(NewSelectColumn(columnRef))
 
 	assert.Len(t, selectNode.Columns(), 1)

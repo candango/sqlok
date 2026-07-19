@@ -11,7 +11,7 @@ import (
 func TestCompileSelectWithColumnRef(t *testing.T) {
 	stmt := dql.NewSelect(
 		dql.NewSelectColumn(
-			elements.NewColumnRef("users", "id").WithSchema("public"),
+			elements.NewColumnRef("users", "id", elements.WithColumnSchema("public")),
 		),
 	)
 
