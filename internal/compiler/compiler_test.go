@@ -4,14 +4,14 @@ import (
 	"testing"
 
 	"github.com/candango/sqlok/internal/dql"
-	"github.com/candango/sqlok/internal/elements"
+	"github.com/candango/sqlok/internal/sst"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestCompileSelectWithColumnRef(t *testing.T) {
 	stmt := dql.NewSelect(
 		dql.NewSelectColumn(
-			elements.NewColumnRef("users", "id", elements.WithColumnSchema("public")),
+			sst.NewColumnRef("users", "id", sst.WithColumnSchema("public")),
 		),
 	)
 
@@ -24,8 +24,8 @@ func TestCompileSelectWithColumnRef(t *testing.T) {
 
 func TestCompileSelectWithMultipleColumnRefs(t *testing.T) {
 	stmt := dql.NewSelect(
-		dql.NewSelectColumn(elements.NewColumnRef("users", "id")),
-		dql.NewSelectColumn(elements.NewColumnRef("users", "name")),
+		dql.NewSelectColumn(sst.NewColumnRef("users", "id")),
+		dql.NewSelectColumn(sst.NewColumnRef("users", "name")),
 	)
 
 	sql, args, err := Compile(stmt)
@@ -37,9 +37,9 @@ func TestCompileSelectWithMultipleColumnRefs(t *testing.T) {
 
 func TestCompileSelectWithFromSource(t *testing.T) {
 	stmt := dql.NewSelect(
-		dql.NewSelectColumn(elements.NewColumnRef("users", "id")),
+		dql.NewSelectColumn(sst.NewColumnRef("users", "id")),
 	).From(
-		elements.NewTableRef("users", elements.WithTableSchema("public")),
+		sst.NewTableRef("users", sst.WithTableSchema("public")),
 	)
 
 	sql, args, err := Compile(stmt)

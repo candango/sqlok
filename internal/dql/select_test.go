@@ -3,7 +3,6 @@ package dql
 import (
 	"testing"
 
-	"github.com/candango/sqlok/internal/elements"
 	"github.com/candango/sqlok/internal/sst"
 	"github.com/stretchr/testify/assert"
 )
@@ -94,8 +93,8 @@ func TestSelectAcceptVisitsSelect(t *testing.T) {
 
 func TestSelectTraversal(t *testing.T) {
 	visitor := &traversingVisitor{}
-	columnRef := elements.NewColumnRef("users", "id", elements.WithColumnSchema("public"))
-	tableRef := elements.NewTableRef("users")
+	columnRef := sst.NewColumnRef("users", "id", sst.WithColumnSchema("public"))
+	tableRef := sst.NewTableRef("users")
 	selectNode := NewSelect(NewSelectColumn(columnRef)).From(tableRef)
 
 	assert.Len(t, selectNode.Columns(), 1)

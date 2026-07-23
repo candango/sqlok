@@ -1,6 +1,4 @@
-package elements
-
-import "github.com/candango/sqlok/internal/sst"
+package sst
 
 // NOTE: Keep this file compact while the elements package is small. Split
 // concrete nodes into focused files like column_ref.go, literal.go, or
@@ -40,7 +38,7 @@ func WithColumnSchema(schema string) ColumnRefOption {
 }
 
 // Accept dispatches the column reference node to the provided visitor.
-func (c *ColumnRef) Accept(v sst.Visitor) error {
+func (c *ColumnRef) Accept(v Visitor) error {
 	return v.VisitColumnRef(c)
 }
 
@@ -91,7 +89,7 @@ func WithTableSchema(schema string) TableRefOption {
 }
 
 // Accept dispatches the table reference node to the provided visitor.
-func (tr *TableRef) Accept(v sst.Visitor) error {
+func (tr *TableRef) Accept(v Visitor) error {
 	return v.VisitTableRef(tr)
 }
 
