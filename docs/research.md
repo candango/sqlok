@@ -372,8 +372,20 @@ behavior.
 Research conclusion for `sqlok`:
 
 ```text
-Start Select with one primary Source() and model future joins as explicit Join
-nodes. Do not represent joins as an undifferentiated Sources() slice.
+Keep TableRef as a reusable schema/table identity for SELECT, CREATE TABLE,
+and INSERT INTO. Add a SELECT-only FromSourceNode boundary that contains
+either a TableRef or a composed Join. Each Join preserves Left, Right,
+JoinType, and On.
+Do not represent joins as an undifferentiated Sources() slice.
 ```
 
+This structure follows SQLAlchemy's important traversal property: a Join is a
+real source node with both sides and an ON expression, not merely a right-hand
+table appended to a query. Traversal of Left, Right, and On supports SQL
+compilation, validation, column discovery, and future disconnected-source
+checks. The fluent API may still express the construction as
+`From(users).Join(orders, condition)`; the AST retains the complete source
+relationship.
+
 Source: [SQLAlchemy Selectable documentation](https://docs.sqlalchemy.org/en/20/core/selectable.html).
+Source: [SQLAlchemy selectable.py](https://github.com/sqlalchemy/sqlalchemy/blob/main/lib/sqlalchemy/sql/selectable.py).

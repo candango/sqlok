@@ -140,6 +140,50 @@ package is small. Once it becomes a grab bag, elements should be split into
 focused files such as `column_ref.go`, `table_ref.go`, `literal.go`, and
 `binary.go`.
 
+## Join naming and rendering
+
+The fluent API may expose both `Join` and `InnerJoin` for readability. They
+represent the same inner-join semantics in the AST. The compiler must always
+render the explicit SQL form:
+
+```sql
+INNER JOIN
+```
+
+This keeps generated SQL unambiguous in long queries. `Join` is a convenience
+name at the construction boundary; it is not a distinct inner-join node.
+
+## FromSourceNode and Join representation
+
+`TableRef` remains the reusable schema/table identity used by `SELECT`,
+`CREATE TABLE`, and `INSERT INTO`. It does not contain SELECT-only join
+semantics.
+
+`FromSourceNode` is the SELECT source boundary. It contains either a
+`TableRef` or a composed `Join`. A `Join` represents an actual relationship
+and preserves both sides for generic AST traversal:
+
+```text
+FromSourceNode
+└── TableRef | Join
+
+Join
+├── Left: FromSourceNode
+├── JoinType: INNER
+├── Right: TableRef
+└── On: ExpressionNode
+```
+
+This preserves the fluent construction shape:
+
+```go
+NewSelect(...).From(users).Join(orders, condition)
+```
+
+The source is a tree, not a flat list of disconnected tables. Traversal walks
+`Left`, `Right`, and `On` for compilation, validation, column discovery, and
+future disconnected-source diagnostics.
+
 ## Current SELECT sequence
 
 The first three slices are implemented:
