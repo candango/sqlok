@@ -3,8 +3,8 @@ package compiler
 import (
 	"testing"
 
-	"github.com/candango/sqlok/internal/dql"
 	"github.com/candango/sqlok/internal/sst"
+	"github.com/candango/sqlok/internal/sst/dql"
 	"github.com/stretchr/testify/assert"
 )
 
