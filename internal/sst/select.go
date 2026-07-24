@@ -8,7 +8,7 @@ type SelectNode interface {
 	Columns() []SelectColumnNode
 
 	// Source returns the primary FROM source.
-	Source() TableRefNode
+	Source() FromSourceNode
 }
 
 // SelectColumnNode represents one projected item in a SELECT columns clause.

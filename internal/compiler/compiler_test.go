@@ -39,7 +39,9 @@ func TestCompileSelectWithFromSource(t *testing.T) {
 	stmt := dql.NewSelect(
 		dql.NewSelectColumn(sst.NewColumnRef("users", "id")),
 	).From(
-		sst.NewTableRef("users", sst.WithTableSchema("public")),
+		dql.NewFromSource(
+			sst.NewTableRef("users", sst.WithTableSchema("public")),
+		),
 	)
 
 	sql, args, err := Compile(stmt)

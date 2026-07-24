@@ -28,6 +28,10 @@ func (v *fakeVisitor) VisitColumnRef(s sst.ColumnRefNode) error {
 	return nil
 }
 
+func (v *fakeVisitor) VisitFromSource(s sst.FromSourceNode) error {
+	return nil
+}
+
 func (v *fakeVisitor) VisitTableRef(s sst.TableRefNode) error {
 	return nil
 }
@@ -43,6 +47,7 @@ type traversingVisitor struct {
 	visitedColumns    int
 	visitedColumnRefs int
 	visitedTableRef   bool
+	visitedFromNode   bool
 }
 
 func (v *traversingVisitor) VisitSelect(s sst.SelectNode) error {
@@ -73,6 +78,17 @@ func (v *traversingVisitor) VisitColumnRef(s sst.ColumnRefNode) error {
 	return nil
 }
 
+func (v *traversingVisitor) VisitFromSource(s sst.FromSourceNode) error {
+	v.visitedFromNode = true
+	if table := s.Table(); table != nil {
+		return table.Accept(v)
+	}
+	if join := s.Join(); join != nil {
+		return join.Accept(v)
+	}
+	return nil
+}
+
 func (v *traversingVisitor) VisitTableRef(s sst.TableRefNode) error {
 	v.visitedTableRef = true
 	return nil
@@ -95,7 +111,8 @@ func TestSelectTraversal(t *testing.T) {
 	visitor := &traversingVisitor{}
 	columnRef := sst.NewColumnRef("users", "id", sst.WithColumnSchema("public"))
 	tableRef := sst.NewTableRef("users")
-	selectNode := NewSelect(NewSelectColumn(columnRef)).From(tableRef)
+	fromSource := NewFromSource(tableRef)
+	selectNode := NewSelect(NewSelectColumn(columnRef)).From(fromSource)
 
 	assert.Len(t, selectNode.Columns(), 1)
 	assert.NoError(t, selectNode.Accept(visitor))
@@ -103,5 +120,6 @@ func TestSelectTraversal(t *testing.T) {
 	assert.True(t, visitor.visitedSelect)
 	assert.Equal(t, 1, visitor.visitedColumns)
 	assert.Equal(t, 1, visitor.visitedColumnRefs)
+	assert.True(t, visitor.visitedFromNode)
 	assert.True(t, visitor.visitedTableRef)
 }

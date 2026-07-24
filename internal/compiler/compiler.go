@@ -44,6 +44,18 @@ func (c *Compiler) VisitSelect(stmt sst.SelectNode) error {
 	return nil
 }
 
+// VisitFromSource renders a base SELECT source reference.
+func (c *Compiler) VisitFromSource(source sst.FromSourceNode) error {
+	if table := source.Table(); table != nil {
+		return table.Accept(c)
+	}
+
+	if join := source.Join(); join != nil {
+		return join.Accept(c)
+	}
+	return nil
+}
+
 // VisitSelectColumn renders the expression projected by a SELECT column.
 func (c *Compiler) VisitSelectColumn(column sst.SelectColumnNode) error {
 	return column.Expr().Accept(c)

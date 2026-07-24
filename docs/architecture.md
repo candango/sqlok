@@ -201,6 +201,18 @@ Accidental cartesian products must not become the silent default. A primary
 source plus explicit joins is the normal direction. Intentional cross joins or
 other disconnected source shapes must be represented explicitly or diagnosed.
 
+## TODO: cache compiled statement shapes
+
+The typed AST/compiler path may cost more during the first construction and
+compilation than direct SQL-string assembly. That cost is acceptable when a
+statement shape can be compiled once and reused for subsequent executions.
+
+This TODO emerged while modeling the `JOIN ... ON` clause: keeping `ON` as a
+structured or parameterized expression improves composition and safety, while
+cached compilation can optimize the repeated execution path. The cache should
+store the SQL template and parameter layout, not request-specific argument
+values. Cache identity must account for the statement shape and SQL dialect.
+
 ## Related documents
 
 - [`vision.md`](vision.md) records the project's purpose and long-term direction.

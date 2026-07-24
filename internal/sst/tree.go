@@ -36,6 +36,8 @@ type Visitor interface {
 	// VisitColumnRef visits a SQL column reference node.
 	VisitColumnRef(ColumnRefNode) error
 
+	VisitFromSource(FromSourceNode) error
+
 	// VisitSelect visits a SELECT statement root node.
 	VisitSelect(SelectNode) error
 
