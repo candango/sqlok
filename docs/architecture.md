@@ -22,19 +22,19 @@ step.
 
 ## Statement roots
 
-A statement root represents one complete SQL operation. `dql.Select` is the
-first statement root being developed.
+A statement root represents one complete SQL operation. `dql.SelectStatement`
+is the first statement root being developed.
 
-`Select` owns the shape of the SELECT operation, including its selected columns
-and, as the implementation grows, its source, joins, criteria, ordering, and
-other clauses.
+`SelectStatement` owns the shape of the SELECT operation, including its
+selected columns and, as the implementation grows, its source, joins, criteria,
+ordering, and other clauses.
 
 The statement is assembled through a fluent API. Fluent clause methods such as
-`From`, `Where`, and `Join` configure the same statement and return `*Select` so
-that the query reads as a chain:
+`From`, `Where`, and `Join` configure the same statement and return
+`*SelectStatement` so that the query reads as a chain:
 
 ```go
-stmt := dql.NewSelect(
+stmt := dql.Select(
     dql.NewSelectColumn(column),
 ).From(source)
 ```
@@ -142,16 +142,15 @@ focused files such as `column_ref.go`, `table_ref.go`, `literal.go`, and
 
 ## Join naming and rendering
 
-The fluent API may expose both `Join` and `InnerJoin` for readability. They
-represent the same inner-join semantics in the AST. The compiler must always
-render the explicit SQL form:
+The current SELECT slice has one concrete join node: `Join`. `InnerJoin` and
+`CrossJoin` are future join types/API variants and are not modeled as separate
+nodes yet.
 
-```sql
-INNER JOIN
-```
-
-This keeps generated SQL unambiguous in long queries. `Join` is a convenience
-name at the construction boundary; it is not a distinct inner-join node.
+`Join` may be created before its `On` condition is supplied. If another `Join`
+is added, the previous join remains in the AST with `On == nil`, and the new
+join becomes the pending join. The compiler and dialect layer decide whether
+that syntax is valid for the target database. An explicit `CrossJoin` remains a
+future, clearer representation for portable cartesian-product intent.
 
 ## FromSourceNode and Join representation
 
@@ -183,18 +182,25 @@ The source chain is traversed in one direction: `Table → Join → Right`.
 `Left` is retained for context and validation but is never followed during
 forward traversal, preventing a cycle when the source owns its join link.
 
+The builder's `pendingJoin` points to the most recently created `Join`. Calling
+`On` completes that join; calling another `Join` advances to a new pending join
+without treating the previous missing `On` as a builder-state error.
+
 ## Current SELECT sequence
 
-The first three slices are implemented:
+The current slices include:
 
 1. model selected columns;
 2. model one primary SELECT source with `TableRef`;
-3. compile the `FROM` clause.
+3. compile the `FROM` clause;
+4. represent and traverse chained `Join` nodes, including missing `On`
+   conditions.
 
 The next slices are:
 
-4. design explicit joins and disconnected-FROM diagnostics;
-5. add WHERE criteria and bind parameters.
+5. compile JOIN rendering and dialect-specific validation;
+6. design disconnected-FROM diagnostics;
+7. add WHERE criteria and bind parameters.
 
 Accidental cartesian products must not become the silent default. A primary
 source plus explicit joins is the normal direction. Intentional cross joins or

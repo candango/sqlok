@@ -53,6 +53,7 @@ type traversingVisitor struct {
 	visitedTableRef   bool
 	visitedFrom       bool
 	visitedJoin       bool
+	joinEvents        []string
 }
 
 func (v *traversingVisitor) VisitSelect(s sst.SelectStatementNode) error {
@@ -85,22 +86,47 @@ func (v *traversingVisitor) VisitColumnRef(s sst.ColumnRefNode) error {
 
 func (v *traversingVisitor) VisitFromSource(s sst.FromSourceNode) error {
 	v.visitedFrom = true
+
 	if table := s.Table(); table != nil {
-		return table.Accept(v)
+		if err := table.Accept(v); err != nil {
+			return err
+		}
 	}
+
 	if join := s.Join(); join != nil {
 		return join.Accept(v)
 	}
+
 	return nil
 }
 
 func (v *traversingVisitor) VisitTableRef(s sst.TableRefNode) error {
 	v.visitedTableRef = true
+	v.joinEvents = append(v.joinEvents, s.Name())
 	return nil
 }
 
-func (v *traversingVisitor) VisitJoin(s sst.JoinNode) error {
+func (v *traversingVisitor) VisitJoin(j sst.JoinNode) error {
 	v.visitedJoin = true
+	v.joinEvents = append(v.joinEvents, "join")
+
+	right := j.Right()
+	if table := right.Table(); table != nil {
+		if err := table.Accept(v); err != nil {
+			return err
+		}
+	}
+
+	if on := j.On(); on != nil {
+		v.joinEvents = append(v.joinEvents, "on")
+		if err := on.Accept(v); err != nil {
+			return err
+		}
+	}
+
+	if next := right.Join(); next != nil {
+		return next.Accept(v)
+	}
 	return nil
 }
 
@@ -122,14 +148,58 @@ func TestSelectTraversal(t *testing.T) {
 	columnRef := sst.NewColumnRef("users", "id", sst.WithColumnSchema("public"))
 	tableRef := sst.NewTableRef("users")
 	fromSource := NewFromSource(tableRef)
-	selectNode := Select(NewSelectColumn(columnRef)).From(fromSource)
+	stmt := Select(NewSelectColumn(columnRef)).From(fromSource)
 
-	assert.Len(t, selectNode.Columns(), 1)
-	assert.NoError(t, selectNode.Accept(visitor))
+	assert.Len(t, stmt.Columns(), 1)
+	assert.NoError(t, stmt.Accept(visitor))
 
 	assert.True(t, visitor.visitedSelect)
 	assert.Equal(t, 1, visitor.visitedColumns)
 	assert.Equal(t, 1, visitor.visitedColumnRefs)
 	assert.True(t, visitor.visitedFrom)
 	assert.True(t, visitor.visitedTableRef)
+}
+
+func TestSelectJoinTraversalChain(t *testing.T) {
+	t.Run("should traverse through a complete join chain", func(t *testing.T) {
+		visitor := &traversingVisitor{}
+
+		stmt := Select().
+			From(NewFromSource(sst.NewTableRef("users"))).
+			Join(NewFromSource(sst.NewTableRef("orders"))).
+			On(&fakeExpr{}).
+			Join(NewFromSource(sst.NewTableRef("items"))).
+			On(&fakeExpr{})
+
+		assert.NoError(t, stmt.Accept(visitor))
+		assert.Equal(t, []string{
+			"users",
+			"join",
+			"orders",
+			"on",
+			"join",
+			"items",
+			"on",
+		}, visitor.joinEvents)
+	})
+
+	t.Run("should allow cartesian product due to a missing on clause", func(t *testing.T) {
+		visitor := &traversingVisitor{}
+
+		stmt := Select().
+			From(NewFromSource(sst.NewTableRef("users"))).
+			Join(NewFromSource(sst.NewTableRef("orders"))).
+			Join(NewFromSource(sst.NewTableRef("items"))).
+			On(&fakeExpr{})
+
+		assert.NoError(t, stmt.Accept(visitor))
+		assert.Equal(t, []string{
+			"users",
+			"join",
+			"orders",
+			"join",
+			"items",
+			"on",
+		}, visitor.joinEvents)
+	})
 }

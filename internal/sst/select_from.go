@@ -4,6 +4,7 @@ package sst
 type JoinType string
 
 const (
+	Join      JoinType = "JOIN"
 	InnerJoin JoinType = "INNER JOIN"
 	CrossJoin JoinType = "CROSS JOIN"
 	LeftJoin  JoinType = "LEFT JOIN"

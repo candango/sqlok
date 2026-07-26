@@ -383,8 +383,8 @@ This structure follows SQLAlchemy's important traversal property: a Join is a
 real source node with both sides and an ON expression, not merely a right-hand
 table appended to a query. Traversal of Left, Right, and On supports SQL
 compilation, validation, column discovery, and future disconnected-source
-checks. The fluent API may still express the construction as
-`From(users).Join(orders, condition)`; the AST retains the complete source
+checks. The fluent API expresses the construction as
+`From(users).Join(orders).On(condition)`; the AST retains the complete source
 relationship.
 
 Source: [SQLAlchemy Selectable documentation](https://docs.sqlalchemy.org/en/20/core/selectable.html).
@@ -406,9 +406,15 @@ while keeping the public API aligned with SQL.
 
 The statement builder owns construction state for the JOIN chain. The source
 stored on the statement remains the root, while a separate tail-source cursor
-identifies the next source attachment point. A `pendingJoin` records the most
-recent JOIN awaiting its `On` condition. Forward traversal follows
-`Table → Join → Right`; `Left` is a back-reference used for context and is not
-traversed. The first construction/state error is stored on `SelectStatement`;
-subsequent builder calls do not mutate the tree, and `Err()` returns the
-original error.
+identifies the next source attachment point. The current AST has one concrete
+join node, `Join`; `InnerJoin` and `CrossJoin` variants are deferred.
+
+A `pendingJoin` records the most recently created `Join`. Calling `On`
+completes that join. Calling another `Join` advances to a new pending join and
+leaves the previous join with `On == nil`; it does not fail the builder. Whether
+an `INNER JOIN` without `ON` is valid is dialect-dependent: some databases
+accept it as cartesian syntax while ANSI-style dialects reject it. Forward
+traversal follows `Table → Join → Right`; `Left` is a back-reference used for
+context and is not traversed. The first construction/state error is stored on
+`SelectStatement`; subsequent builder calls do not mutate the tree, and
+`Err()` returns the original error.

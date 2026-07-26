@@ -53,18 +53,15 @@ func (s *SelectStatement) From(source sst.FromSourceNode) *SelectStatement {
 	return s
 }
 
-// Join adds a source to the forward join chain and waits for On to complete
-// the new join condition.
+// Join adds a source to the forward join chain and makes the new Join the
+// pending join. A later Join may supersede a pending join whose On condition
+// is still nil; dialect validation decides whether that SQL is allowed.
 func (s *SelectStatement) Join(source sst.FromSourceNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
 	if s.tailSource == nil {
 		s.err = errors.New("JOIN requires a FROM source")
-		return s
-	}
-	if s.pendingJoin != nil {
-		s.err = errors.New("JOIN requires ON from the a pending join")
 		return s
 	}
 	if source == nil {
@@ -106,13 +103,16 @@ func (s *SelectStatement) Source() sst.FromSourceNode {
 	return s.source
 }
 
+// FromSource represents a SELECT source table and its next attached join.
 type FromSource struct {
 	table sst.TableRefNode
 	join  sst.JoinNode
 }
 
+// FromSourceOption configures a FromSource during construction.
 type FromSourceOption func(fs *FromSource)
 
+// NewFromSource creates a SELECT source from a table reference.
 func NewFromSource(table sst.TableRefNode, options ...FromSourceOption) *FromSource {
 	fs := &FromSource{
 		table: table,
@@ -147,14 +147,19 @@ func (fs *FromSource) Join() sst.JoinNode {
 	return fs.join
 }
 
+// Table returns the table attached to this source.
 func (fs *FromSource) Table() sst.TableRefNode {
 	return fs.table
 }
 
+// Accept dispatches the source to the provided visitor.
 func (fs *FromSource) Accept(v sst.Visitor) error {
 	return v.VisitFromSource(fs)
 }
 
+// Join represents one relationship between a left source and a right source.
+// Its On condition may be nil until the builder or dialect validation resolves
+// the incomplete join.
 type Join struct {
 	left  sst.FromSourceNode
 	right sst.FromSourceNode
@@ -162,8 +167,10 @@ type Join struct {
 	on    sst.Node
 }
 
+// JoinOption configures a Join during construction.
 type JoinOption func(j *Join)
 
+// NewJoin creates a Join between the left and right sources.
 func NewJoin(left sst.FromSourceNode, right sst.FromSourceNode, options ...JoinOption) *Join {
 	j := &Join{
 		left:  left,
@@ -178,6 +185,7 @@ func NewJoin(left sst.FromSourceNode, right sst.FromSourceNode, options ...JoinO
 	return j
 }
 
+// WithJoinType configures the SQL join type.
 func WithJoinType(jtype sst.JoinType) JoinOption {
 	return func(j *Join) {
 		j.jtype = jtype
