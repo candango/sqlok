@@ -389,3 +389,26 @@ relationship.
 
 Source: [SQLAlchemy Selectable documentation](https://docs.sqlalchemy.org/en/20/core/selectable.html).
 Source: [SQLAlchemy selectable.py](https://github.com/sqlalchemy/sqlalchemy/blob/main/lib/sqlalchemy/sql/selectable.py).
+
+## SELECT public constructor and concrete statement type
+
+The SELECT API uses SQL terminology at its public boundary:
+
+```go
+stmt := Select(columns...).From(source)
+```
+
+`Select(...)` is the public constructor. It returns `SelectStatement`, the
+concrete builder and AST root. `SelectStatementNode` is the SST behavior
+contract; it is not the concrete type name. This avoids a Go package-level
+identifier collision between a `Select` type and a `Select(...)` constructor
+while keeping the public API aligned with SQL.
+
+The statement builder owns construction state for the JOIN chain. The source
+stored on the statement remains the root, while a separate tail-source cursor
+identifies the next source attachment point. A `pendingJoin` records the most
+recent JOIN awaiting its `On` condition. Forward traversal follows
+`Table → Join → Right`; `Left` is a back-reference used for context and is not
+traversed. The first construction/state error is stored on `SelectStatement`;
+subsequent builder calls do not mutate the tree, and `Err()` returns the
+original error.

@@ -51,6 +51,20 @@ Select("id", "name").From("users").Where(Eq("id", 1)).Build()
 
 The DSL should not concatenate final SQL directly forever. Its long-term role is to populate an internal AST.
 
+For SELECT construction, the public entry point is `Select(...)`. It returns a
+`SelectStatement`, which is the concrete builder and AST root:
+
+```go
+stmt := Select(id, name).
+    From(users).
+    Join(orders).
+    On(userID == orderUserID)
+```
+
+`Select` is the SQL-facing constructor; `SelectStatement` is the concrete
+statement type. The SST `SelectStatementNode` remains the behavior contract
+implemented by `SelectStatement`.
+
 ### AST
 
 The AST is the structured representation of a SQL statement before it becomes a string.
@@ -69,7 +83,7 @@ Delete → root of a DELETE statement
 Statement roots own the shape of the whole query operation. Smaller nodes hang
 below them.
 
-A `Select` root should represent query intent, such as:
+A `SelectStatement` root should represent query intent, such as:
 - columns clause items, named `Columns` in `sqlok`
 - relational sources
 - joins
@@ -103,7 +117,7 @@ The initial mental model should distinguish statement roots from child nodes:
 
 ```text
 Statement roots:
-  Select
+  SelectStatement
   Insert
   Update
   Delete
@@ -211,7 +225,7 @@ internal/
     ast.go          # base AST contracts only: Node, Statement, Visitor shape
 
   dql/
-    select.go       # SELECT statement root
+    select.go       # SELECT statement root and Select(...) constructor
 
   dml/
     insert.go       # INSERT statement root
@@ -253,8 +267,8 @@ favor compiler-owned dispatch or a Visitor abstraction that does not require
 `ast` to import concrete statement packages.
 
 Open SELECT interface questions:
-- `SelectNode` may live in the base tree package as a behavior interface.
-- `SelectNode` should not be a marker-only interface.
+- `SelectStatementNode` lives in the base tree package as a behavior interface.
+- `SelectStatementNode` should not be a marker-only interface.
 - A useful first behavior is `Columns() []Node`.
 - Do not introduce `Expression` yet if it only duplicates `Node` or creates
   package-cycle pressure.
@@ -318,7 +332,7 @@ builder method calls → AST nodes → compiler output
 ```
 
 The learning path should continue from the current SELECT slice:
-- connect the public builder to the `Select` statement root
+- connect the public `Select(...)` builder to the `SelectStatement` root
 - add explicit joins and disconnected-FROM diagnostics
 - add WHERE criteria and bind parameters
 - then define `Insert`, `Update`, and `Delete` as separate statement roots

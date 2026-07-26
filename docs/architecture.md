@@ -92,7 +92,7 @@ an error returned by the AST constructors.
 The base contracts live in `internal/sst`:
 
 - `Node` defines visitor dispatch through `Accept`.
-- `SelectNode` represents a SELECT statement root.
+- `SelectStatementNode` represents a SELECT statement root and extends `StatementNode`.
 - `SelectColumnNode` represents one selected item.
 - `ColumnRefNode` represents a qualified or unqualified column reference.
 - `TableRefNode` represents a qualified or unqualified table reference.
@@ -159,30 +159,29 @@ name at the construction boundary; it is not a distinct inner-join node.
 `CREATE TABLE`, and `INSERT INTO`. It does not contain SELECT-only join
 semantics.
 
-`FromSourceNode` is the SELECT source boundary. It contains either a
-`TableRef` or a composed `Join`. A `Join` represents an actual relationship
-and preserves both sides for generic AST traversal:
+`FromSourceNode` is the SELECT source boundary. It stores the source table and
+may own the next attached `Join`. A `Join` represents an actual relationship
+and preserves both sides:
 
 ```text
 FromSourceNode
-└── TableRef | Join
-
-Join
-├── Left: FromSourceNode
-├── JoinType: INNER
-├── Right: TableRef
-└── On: ExpressionNode
+├── Table: TableRef
+└── Join: Join
+    ├── Left: FromSourceNode (back-reference)
+    ├── JoinType: INNER
+    ├── Right: FromSourceNode (next traversal point)
+    └── On: Node
 ```
 
 This preserves the fluent construction shape:
 
 ```go
-NewSelect(...).From(users).Join(orders, condition)
+Select(...).From(users).Join(orders).On(condition)
 ```
 
-The source is a tree, not a flat list of disconnected tables. Traversal walks
-`Left`, `Right`, and `On` for compilation, validation, column discovery, and
-future disconnected-source diagnostics.
+The source chain is traversed in one direction: `Table → Join → Right`.
+`Left` is retained for context and validation but is never followed during
+forward traversal, preventing a cycle when the source owns its join link.
 
 ## Current SELECT sequence
 
