@@ -6,6 +6,15 @@ type Node interface {
 	Accept(Visitor) error
 }
 
+// StatementNode represents a SQL statement root that can report a
+// construction error before compilation or execution.
+type StatementNode interface {
+	Node
+
+	// Err returns the first construction error recorded by the statement.
+	Err() error
+}
+
 // ColumnRefNode represents a reference to a SQL column.
 type ColumnRefNode interface {
 	Node
@@ -38,8 +47,10 @@ type Visitor interface {
 
 	VisitFromSource(FromSourceNode) error
 
+	VisitJoin(JoinNode) error
+
 	// VisitSelect visits a SELECT statement root node.
-	VisitSelect(SelectNode) error
+	VisitSelect(SelectStatementNode) error
 
 	// VisitSelectColumn visits one projected item in a SELECT columns clause.
 	VisitSelectColumn(SelectColumnNode) error

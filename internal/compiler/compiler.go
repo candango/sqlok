@@ -6,10 +6,10 @@ import (
 	"github.com/candango/sqlok/internal/sst"
 )
 
-// Compile compiles a SELECT statement node into SQL text and bound arguments.
-// TODO: Introduce sst.StatementNode once more statement roots exist, then make
-// Compile receive that broader statement contract instead of sst.SelectNode.
-func Compile(stmt sst.SelectNode) (string, []any, error) {
+// Compile compiles a statement node into SQL text and bound arguments.
+// The compiler currently implements SELECT rendering; additional statement
+// roots can use the same StatementNode boundary as their visitors are added.
+func Compile(stmt sst.StatementNode) (string, []any, error) {
 	c := &Compiler{}
 	if err := stmt.Accept(c); err != nil {
 		return "", nil, err
@@ -25,7 +25,7 @@ type Compiler struct {
 
 // VisitSelect renders a SELECT statement and visits its projected columns
 // and primary FROM source.
-func (c *Compiler) VisitSelect(stmt sst.SelectNode) error {
+func (c *Compiler) VisitSelect(stmt sst.SelectStatementNode) error {
 	c.parts = append(c.parts, "SELECT ")
 	for i, column := range stmt.Columns() {
 		if i > 0 {
@@ -44,7 +44,8 @@ func (c *Compiler) VisitSelect(stmt sst.SelectNode) error {
 	return nil
 }
 
-// VisitFromSource renders a base SELECT source reference.
+// VisitFromSource renders the base SELECT source reference. Forward JOIN
+// traversal will continue from the source's attached join through Right.
 func (c *Compiler) VisitFromSource(source sst.FromSourceNode) error {
 	if table := source.Table(); table != nil {
 		return table.Accept(c)
@@ -53,6 +54,12 @@ func (c *Compiler) VisitFromSource(source sst.FromSourceNode) error {
 	if join := source.Join(); join != nil {
 		return join.Accept(c)
 	}
+	return nil
+}
+
+// VisitJoin renders a JOIN relationship. Its Right source is the forward
+// traversal edge; Left is a back-reference and must not be traversed here.
+func (c *Compiler) VisitJoin(join sst.JoinNode) error {
 	return nil
 }
 

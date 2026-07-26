@@ -9,7 +9,7 @@ import (
 )
 
 func TestCompileSelectWithColumnRef(t *testing.T) {
-	stmt := dql.NewSelect(
+	stmt := dql.Select(
 		dql.NewSelectColumn(
 			sst.NewColumnRef("users", "id", sst.WithColumnSchema("public")),
 		),
@@ -23,7 +23,7 @@ func TestCompileSelectWithColumnRef(t *testing.T) {
 }
 
 func TestCompileSelectWithMultipleColumnRefs(t *testing.T) {
-	stmt := dql.NewSelect(
+	stmt := dql.Select(
 		dql.NewSelectColumn(sst.NewColumnRef("users", "id")),
 		dql.NewSelectColumn(sst.NewColumnRef("users", "name")),
 	)
@@ -36,7 +36,7 @@ func TestCompileSelectWithMultipleColumnRefs(t *testing.T) {
 }
 
 func TestCompileSelectWithFromSource(t *testing.T) {
-	stmt := dql.NewSelect(
+	stmt := dql.Select(
 		dql.NewSelectColumn(sst.NewColumnRef("users", "id")),
 	).From(
 		dql.NewFromSource(

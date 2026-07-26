@@ -1,8 +1,8 @@
 package sst
 
-// SelectNode represents the root node of a SELECT statement.
-type SelectNode interface {
-	Node
+// SelectStatementNode represents the root node of a SELECT statement.
+type SelectStatementNode interface {
+	StatementNode
 
 	// Columns returns the projected columns in this SELECT statement.
 	Columns() []SelectColumnNode
