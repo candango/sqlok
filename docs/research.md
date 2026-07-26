@@ -418,3 +418,25 @@ traversal follows `Table → Join → Right`; `Left` is a back-reference used fo
 context and is not traversed. The first construction/state error is stored on
 `SelectStatement`; subsequent builder calls do not mutate the tree, and
 `Err()` returns the original error.
+
+## Go SQL builders and value operands
+
+Several Go SQL libraries accept ordinary Go values at their public condition or
+value-building boundary and convert them to bound SQL arguments:
+
+- Squirrel documents `sq.Eq{"deleted_at": nil}` and value-bearing `Values(...)`
+  calls that produce SQL with placeholders and a separate argument list:
+  https://github.com/Masterminds/squirrel
+- GORM's `clause.Eq` stores `Column interface{}` and `Value interface{}` and
+  builds the comparison through its clause builder:
+  https://pkg.go.dev/gorm.io/gorm/clause
+
+The important boundary is not whether the public DSL accepts a Go value. The
+value must be normalized into a bind/value AST node and must not be
+concatenated into SQL text.
+
+This does not make a value operand equivalent to a column reference. For
+example, a map-style `Eq` API generally represents `column = bound value`; a
+column-to-column comparison such as `users.id = orders.user_id` needs an
+expression form that represents both operands as column nodes. `sqlok` should
+keep these cases distinct in its condition AST.

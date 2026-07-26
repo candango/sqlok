@@ -202,9 +202,13 @@ The next slices are:
 6. design disconnected-FROM diagnostics;
 7. add WHERE criteria and bind parameters.
 
-Accidental cartesian products must not become the silent default. A primary
-source plus explicit joins is the normal direction. Intentional cross joins or
-other disconnected source shapes must be represented explicitly or diagnosed.
+Accidental cartesian products from disconnected sources must not be silent. A
+primary source plus explicit joins remains the normal construction path.
+
+A `Join` with `On == nil` is retained in the AST because its syntactic validity
+depends on the target dialect. Compiler/dialect validation decides whether that
+form is allowed. A future `CrossJoin` will provide an explicit, portable
+representation for intentional cartesian products.
 
 ## TODO: cache compiled statement shapes
 
