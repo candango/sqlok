@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/candango/sqlok/internal/sst"
@@ -44,6 +45,24 @@ func (c *Compiler) VisitSelect(stmt sst.SelectStatementNode) error {
 	return nil
 }
 
+func (c *Compiler) VisitBinaryExpression(expr sst.BinaryExpressionNode) error {
+	if err := expr.Left().Accept(c); err != nil {
+		return err
+	}
+	switch expr.Operator() {
+	case sst.Equal,
+		sst.NotEqual,
+		sst.GreaterThan,
+		sst.GreaterThanOrEqual,
+		sst.LessThan,
+		sst.LessThanOrEqual:
+		c.parts = append(c.parts, " ", string(expr.Operator()), " ")
+	default:
+		return errors.New("unsupported comparison operator")
+	}
+	return expr.Right().Accept(c)
+}
+
 // VisitFromSource renders the base SELECT source reference. Forward JOIN
 // traversal will continue from the source's attached join through Right.
 func (c *Compiler) VisitFromSource(source sst.FromSourceNode) error {
@@ -61,11 +80,6 @@ func (c *Compiler) VisitFromSource(source sst.FromSourceNode) error {
 // traversal edge; Left is a back-reference and must not be traversed here.
 func (c *Compiler) VisitJoin(join sst.JoinNode) error {
 	return nil
-}
-
-// VisitSelectColumn renders the expression projected by a SELECT column.
-func (c *Compiler) VisitSelectColumn(column sst.SelectColumnNode) error {
-	return column.Expr().Accept(c)
 }
 
 // VisitColumnRef renders a qualified or unqualified SQL column reference.

@@ -8,15 +8,15 @@ import (
 
 // SelectStatement is the root node of a SELECT statement.
 type SelectStatement struct {
-	columns     []sst.SelectColumnNode
+	columns     []sst.ExpressionNode
 	source      sst.FromSourceNode
 	tailSource  sst.FromSourceNode
 	pendingJoin *Join
 	err         error
 }
 
-// Select creates a SELECT statement root with the provided projected columns.
-func Select(columns ...sst.SelectColumnNode) *SelectStatement {
+// Select creates a SELECT statement root with the provided projected expressions.
+func Select(columns ...sst.ExpressionNode) *SelectStatement {
 	s := &SelectStatement{
 		columns: columns,
 	}
@@ -34,8 +34,8 @@ func (s *SelectStatement) Err() error {
 	return s.err
 }
 
-// Columns returns the projected columns in this SELECT statement.
-func (s *SelectStatement) Columns() []sst.SelectColumnNode {
+// Columns returns the projected expressions in this SELECT statement.
+func (s *SelectStatement) Columns() []sst.ExpressionNode {
 	return s.columns
 }
 

@@ -52,9 +52,8 @@ type Visitor interface {
 	// VisitSelect visits a SELECT statement root node.
 	VisitSelect(SelectStatementNode) error
 
-	// VisitSelectColumn visits one projected item in a SELECT columns clause.
-	VisitSelectColumn(SelectColumnNode) error
-
 	// VisitTableRef visits a SQL table reference node.
 	VisitTableRef(TableRefNode) error
+
+	VisitBinaryExpression(BinaryExpressionNode) error
 }

@@ -9,7 +9,6 @@ import (
 
 type fakeVisitor struct {
 	visitedSelect     bool
-	visitedColumns    int
 	visitedColumnRefs int
 }
 
@@ -18,8 +17,7 @@ func (v *fakeVisitor) VisitSelect(s sst.SelectStatementNode) error {
 	return nil
 }
 
-func (v *fakeVisitor) VisitSelectColumn(s sst.SelectColumnNode) error {
-	v.visitedColumns++
+func (v *fakeVisitor) VisitBinaryExpression(expr sst.BinaryExpressionNode) error {
 	return nil
 }
 
@@ -47,13 +45,13 @@ func (e *fakeExpr) Accept(v sst.Visitor) error {
 }
 
 type traversingVisitor struct {
-	visitedSelect     bool
-	visitedColumns    int
-	visitedColumnRefs int
-	visitedTableRef   bool
-	visitedFrom       bool
-	visitedJoin       bool
-	joinEvents        []string
+	visitedSelect            bool
+	visitedColumnRefs        int
+	visitedTableRef          bool
+	visitedFrom              bool
+	visitedJoin              bool
+	joinEvents               []string
+	visitedBinaryExpressions int
 }
 
 func (v *traversingVisitor) VisitSelect(s sst.SelectStatementNode) error {
@@ -74,14 +72,23 @@ func (v *traversingVisitor) VisitSelect(s sst.SelectStatementNode) error {
 	return nil
 }
 
-func (v *traversingVisitor) VisitSelectColumn(s sst.SelectColumnNode) error {
-	v.visitedColumns++
-	return s.Expr().Accept(v)
-}
-
 func (v *traversingVisitor) VisitColumnRef(s sst.ColumnRefNode) error {
 	v.visitedColumnRefs++
 	return nil
+}
+
+func (v *traversingVisitor) VisitBinaryExpression(expr sst.BinaryExpressionNode) error {
+	v.visitedBinaryExpressions++
+
+	if err := expr.Left().Accept(v); err != nil {
+		return err
+	}
+
+	v.joinEvents = append(v.joinEvents, "left:"+expr.Left().Expr())
+	v.joinEvents = append(v.joinEvents, "binary:"+string(expr.Operator()))
+	v.joinEvents = append(v.joinEvents, "right:"+expr.Right().Expr())
+
+	return expr.Right().Accept(v)
 }
 
 func (v *traversingVisitor) VisitFromSource(s sst.FromSourceNode) error {
@@ -148,13 +155,12 @@ func TestSelectTraversal(t *testing.T) {
 	columnRef := sst.NewColumnRef("users", "id", sst.WithColumnSchema("public"))
 	tableRef := sst.NewTableRef("users")
 	fromSource := NewFromSource(tableRef)
-	stmt := Select(NewSelectColumn(columnRef)).From(fromSource)
+	stmt := Select(columnRef).From(fromSource)
 
 	assert.Len(t, stmt.Columns(), 1)
 	assert.NoError(t, stmt.Accept(visitor))
 
 	assert.True(t, visitor.visitedSelect)
-	assert.Equal(t, 1, visitor.visitedColumns)
 	assert.Equal(t, 1, visitor.visitedColumnRefs)
 	assert.True(t, visitor.visitedFrom)
 	assert.True(t, visitor.visitedTableRef)
@@ -167,19 +173,27 @@ func TestSelectJoinTraversalChain(t *testing.T) {
 		stmt := Select().
 			From(NewFromSource(sst.NewTableRef("users"))).
 			Join(NewFromSource(sst.NewTableRef("orders"))).
-			On(&fakeExpr{}).
+			On(sst.Eq(sst.NewColumnRef("users", "id"), sst.NewColumnRef("orders", "user_id"))).
 			Join(NewFromSource(sst.NewTableRef("items"))).
-			On(&fakeExpr{})
+			On(sst.Eq(sst.NewColumnRef("orders", "id"), sst.NewColumnRef("items", "order_id")))
 
 		assert.NoError(t, stmt.Accept(visitor))
+		assert.Equal(t, 2, visitor.visitedBinaryExpressions)
+		assert.Equal(t, 4, visitor.visitedColumnRefs)
 		assert.Equal(t, []string{
 			"users",
 			"join",
 			"orders",
 			"on",
+			"left:users.id",
+			"binary:=",
+			"right:orders.user_id",
 			"join",
 			"items",
 			"on",
+			"left:orders.id",
+			"binary:=",
+			"right:items.order_id",
 		}, visitor.joinEvents)
 	})
 

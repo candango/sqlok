@@ -1,5 +1,7 @@
 package sst
 
+import "strings"
+
 // NOTE: Keep this file compact while the elements package is small. Split
 // concrete nodes into focused files like column_ref.go, literal.go, or
 // binary.go once this starts becoming a grab bag.
@@ -35,6 +37,17 @@ func WithColumnSchema(schema string) ColumnRefOption {
 	return func(c *ColumnRef) {
 		c.schema = schema
 	}
+}
+
+// Expr marks ColumnRef as an expression node.
+func (c *ColumnRef) Expr() string {
+	expr := []string{}
+	if strings.Trim(c.schema, " ") != "" {
+		expr = append(expr, c.schema)
+	}
+	expr = append(expr, c.table)
+	expr = append(expr, c.name)
+	return strings.Join(expr, ".")
 }
 
 // Accept dispatches the column reference node to the provided visitor.
