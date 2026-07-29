@@ -45,8 +45,10 @@ type Visitor interface {
 	// VisitColumnRef visits a SQL column reference node.
 	VisitColumnRef(ColumnRefNode) error
 
+	// VisitFromSource visits a SELECT source and its attached joins.
 	VisitFromSource(FromSourceNode) error
 
+	// VisitJoin visits a join relationship between SELECT sources.
 	VisitJoin(JoinNode) error
 
 	// VisitSelect visits a SELECT statement root node.
@@ -55,7 +57,6 @@ type Visitor interface {
 	// VisitTableRef visits a SQL table reference node.
 	VisitTableRef(TableRefNode) error
 
-	VisitBinaryExpression(BinaryExpressionNode) error
-
-	VisitLiteral(LiteralNode) error
+	// VisitExpression visits an expression node for SQL rendering.
+	VisitExpression(ExpressionNode) error
 }

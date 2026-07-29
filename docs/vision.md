@@ -109,7 +109,9 @@ DML roots should represent their own operation-specific shape:
 - `Update`: target table, values/set clauses, where criteria, returning
 - `Delete`: target table, where criteria, returning
 
-The AST is not responsible for rendering SQL.
+The AST owns query structure and traversal order through `Accept`. Expression
+nodes expose their own `Expr()` representation, while the compiler owns final
+SQL rendering, dialect syntax, and argument collection.
 
 #### Node categories
 
@@ -125,7 +127,7 @@ Statement roots:
 Child/query-shape nodes:
   Table
   Column
-  Literal / Bind
+  ExpressionNode / BindParamNode
   WhereCriteria
   Join
   Ordering
@@ -137,9 +139,11 @@ clear.
 
 ### Compiler
 
-The compiler walks the AST and produces SQL text plus bound parameters.
-
-It owns traversal/rendering logic, not the AST nodes themselves.
+The compiler receives AST visitor callbacks and produces SQL text plus bound
+parameters. Composite AST nodes own structural traversal through `Accept`; the
+compiler owns rendering, dialect syntax, and argument collection. A
+`BinaryExpression` delegates to its left operand, emits its operator through the
+visitor, and then delegates to its right operand.
 
 Open design choice: `Compile()` may be exposed as an ergonomic method on
 statement roots while still delegating the real work to the compiler boundary.
@@ -212,8 +216,8 @@ The main imported lessons are:
 - keep the public builder as the DSL
 - use statement roots such as `Select`, `Insert`, `Update`, and `Delete`
 - prefer `Criteria` / `WhereCriteria` vocabulary for WHERE filtering
-- keep AST nodes structural
-- keep SQL rendering in a compiler/dialect boundary
+- keep AST nodes structural and responsible for child traversal
+- keep final SQL rendering in a compiler/dialect boundary
 
 ## Proposed package shape
 
@@ -292,10 +296,14 @@ Two viable options:
    - less boilerplate at the beginning
 
 Decision for now:
-- understand the Visitor pattern as the established AST pattern
+- use the Visitor pattern as the established AST pattern
 - keep the first implementation small
-- do not put `String()` / `ToSQL()` behavior on AST nodes
-- keep SQL rendering in the compiler
+- let composite nodes delegate child `Accept` calls in SQL order
+- let `VisitExpression` render the current expression; its agreed type switch
+  handles binary expressions and the planned `BindParamNode`
+- do not put final `String()` / `ToSQL()` behavior on AST nodes; `Expr()` is the
+  expression-level representation used by the current AST contract
+- keep final SQL rendering in the compiler
 - keep `Compile()` as an open API decision: a method is ergonomically attractive,
   but must delegate to compiler logic if adopted
 
@@ -323,8 +331,9 @@ Things that do not belong in core:
 ## Current direction
 
 The initial SELECT AST path now exists for projected columns and one primary
-source, with compilation into SQL and bound arguments. The public builder still
-starts as string construction and has not yet been connected to the AST path.
+source, with compilation into SQL and an argument-collection boundary. The
+public builder still starts as string construction and has not yet been
+connected to the AST path. Bind-parameter nodes remain a planned next slice.
 The next architectural step is to move builder behavior toward:
 
 ```text

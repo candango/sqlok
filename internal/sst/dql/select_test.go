@@ -17,20 +17,16 @@ func (v *fakeVisitor) VisitSelect(s sst.SelectStatementNode) error {
 	return nil
 }
 
-func (v *fakeVisitor) VisitBinaryExpression(expr sst.BinaryExpressionNode) error {
-	return nil
-}
-
 func (v *fakeVisitor) VisitColumnRef(s sst.ColumnRefNode) error {
 	v.visitedColumnRefs++
 	return nil
 }
 
-func (v *fakeVisitor) VisitFromSource(s sst.FromSourceNode) error {
+func (v *fakeVisitor) VisitExpression(expr sst.ExpressionNode) error {
 	return nil
 }
 
-func (v *fakeVisitor) VisitLiteral(expr sst.LiteralNode) error {
+func (v *fakeVisitor) VisitFromSource(s sst.FromSourceNode) error {
 	return nil
 }
 
@@ -82,38 +78,30 @@ func (v *traversingVisitor) VisitColumnRef(s sst.ColumnRefNode) error {
 	return nil
 }
 
-func (v *traversingVisitor) VisitBinaryExpression(expr sst.BinaryExpressionNode) error {
-	v.visitedBinaryExpressions++
-
-	if err := expr.Left().Accept(v); err != nil {
-		return err
+func (v *traversingVisitor) VisitExpression(expr sst.ExpressionNode) error {
+	switch e := expr.(type) {
+	case sst.BinaryExpressionNode:
+		v.visitedBinaryExpressions++
+		v.joinEvents = append(
+			v.joinEvents,
+			"binary:"+e.Left().Expr()+" "+string(e.Expr())+" "+e.Right().Expr(),
+		)
+	case *sst.Literal:
+		v.visitedLiterals++
 	}
-
-	v.joinEvents = append(v.joinEvents, "left:"+expr.Left().Expr())
-	v.joinEvents = append(v.joinEvents, "binary:"+string(expr.Operator()))
-	v.joinEvents = append(v.joinEvents, "right:"+expr.Right().Expr())
-
-	return expr.Right().Accept(v)
+	return nil
 }
 
 func (v *traversingVisitor) VisitFromSource(s sst.FromSourceNode) error {
 	v.visitedFrom = true
-
 	if table := s.Table(); table != nil {
 		if err := table.Accept(v); err != nil {
 			return err
 		}
 	}
-
 	if join := s.Join(); join != nil {
 		return join.Accept(v)
 	}
-
-	return nil
-}
-
-func (v *traversingVisitor) VisitLiteral(l sst.LiteralNode) error {
-	v.visitedLiterals++
 	return nil
 }
 
@@ -195,15 +183,11 @@ func TestSelectJoinTraversalChain(t *testing.T) {
 			"join",
 			"orders",
 			"on",
-			"left:users.id",
-			"binary:=",
-			"right:orders.user_id",
+			"binary:users.id = orders.user_id",
 			"join",
 			"items",
 			"on",
-			"left:orders.id",
-			"binary:=",
-			"right:items.order_id",
+			"binary:orders.id = items.order_id",
 		}, visitor.joinEvents)
 	})
 
@@ -224,9 +208,7 @@ func TestSelectJoinTraversalChain(t *testing.T) {
 			"join",
 			"orders",
 			"on",
-			"left:users.id",
-			"binary:=",
-			"right:1",
+			"binary:users.id = 1",
 		}, visitor.joinEvents)
 	})
 

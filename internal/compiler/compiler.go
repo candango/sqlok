@@ -45,22 +45,26 @@ func (c *Compiler) VisitSelect(stmt sst.SelectStatementNode) error {
 	return nil
 }
 
-func (c *Compiler) VisitBinaryExpression(expr sst.BinaryExpressionNode) error {
-	if err := expr.Left().Accept(c); err != nil {
-		return err
-	}
-	switch expr.Operator() {
-	case sst.Equal,
-		sst.NotEqual,
-		sst.GreaterThan,
-		sst.GreaterThanOrEqual,
-		sst.LessThan,
-		sst.LessThanOrEqual:
-		c.parts = append(c.parts, " ", string(expr.Operator()), " ")
+// VisitExpression renders the current expression node. Composite binary
+// expressions have already traversed their operands before this call.
+func (c *Compiler) VisitExpression(expr sst.ExpressionNode) error {
+	switch e := expr.(type) {
+	case sst.BinaryExpressionNode:
+		switch e.Operator() {
+		case sst.Equal,
+			sst.NotEqual,
+			sst.GreaterThan,
+			sst.GreaterThanOrEqual,
+			sst.LessThan,
+			sst.LessThanOrEqual:
+			c.parts = append(c.parts, " ", string(e.Operator()), " ")
+		default:
+			return errors.New("unsupported comparison operator")
+		}
 	default:
-		return errors.New("unsupported comparison operator")
+		c.parts = append(c.parts, e.Expr())
 	}
-	return expr.Right().Accept(c)
+	return nil
 }
 
 // VisitFromSource renders the base SELECT source reference. Forward JOIN
@@ -116,11 +120,6 @@ func (c *Compiler) VisitColumnRef(column sst.ColumnRefNode) error {
 	}
 	parts = append(parts, column.Name())
 	c.parts = append(c.parts, strings.Join(parts, "."))
-	return nil
-}
-
-func (c *Compiler) VisitLiteral(l sst.LiteralNode) error {
-	c.parts = append(c.parts, l.Expr())
 	return nil
 }
 

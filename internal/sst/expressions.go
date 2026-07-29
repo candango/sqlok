@@ -1,6 +1,9 @@
 package sst
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // ExpressionNode represents a SQL expression that can participate in a
 // projection or expression operation.
@@ -34,29 +37,24 @@ func NewBinaryExpression(left, right ExpressionNode, op ComparisonOperator) *Bin
 	}
 }
 
-type LiteralNode interface {
-	ExpressionNode
-	Value() any
-}
-
+// Literal represents an expression rendered directly as SQL text.
 type Literal struct {
 	value any
 }
 
+// NewLiteral creates a literal expression from the provided value.
 func NewLiteral(value any) *Literal {
 	return &Literal{value: value}
 }
 
-func (l *Literal) Value() any {
-	return l.value
-}
-
+// Expr returns the SQL text representation of the literal.
 func (l *Literal) Expr() string {
 	return fmt.Sprintf("%v", l.value)
 }
 
+// Accept dispatches the literal expression to the provided visitor.
 func (l *Literal) Accept(v Visitor) error {
-	return v.VisitLiteral(l)
+	return v.VisitExpression(l)
 }
 
 // Eq creates an equality expression.
@@ -69,14 +67,31 @@ func Gt(left, right ExpressionNode) *BinaryExpression {
 	return NewBinaryExpression(left, right, GreaterThan)
 }
 
-// Expr marks BinaryExpression as an expression node.
+// Expr returns the operator token for the binary expression.
 func (e *BinaryExpression) Expr() string {
-	return fmt.Sprintf("%s %s %s", e.left.Expr(), string(e.op), e.right.Expr())
+	return string(e.op)
 }
 
-// Accept dispatches the binary expression to the provided visitor.
+// Accept traverses the operands and dispatches the binary expression between
+// them so visitors can render infix operators in the correct order.
 func (e *BinaryExpression) Accept(v Visitor) error {
-	return v.VisitBinaryExpression(e)
+	if err := e.Left().Accept(v); err != nil {
+		return err
+	}
+	switch e.Operator() {
+	case Equal,
+		NotEqual,
+		GreaterThan,
+		GreaterThanOrEqual,
+		LessThan,
+		LessThanOrEqual:
+		if err := v.VisitExpression(e); err != nil {
+			return err
+		}
+	default:
+		return errors.New("unsupported comparison operator")
+	}
+	return e.Right().Accept(v)
 }
 
 // Left returns the left expression operand.

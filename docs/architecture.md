@@ -13,8 +13,9 @@ The current SELECT path is:
 Select statement → AST nodes → Visitor/compiler → SQL + args
 ```
 
-The AST represents query intent. The compiler owns SQL rendering and argument
-collection. AST nodes do not render SQL themselves.
+The AST represents query intent and owns structural traversal through `Accept`.
+Expression nodes expose their own `Expr()` representation, while the compiler
+owns final SQL rendering, dialect syntax, and argument collection.
 
 The older public builder in `internal/builder.go` is not yet fully connected to
 this AST pipeline. Moving that builder toward AST construction remains a later
@@ -35,7 +36,7 @@ The statement is assembled through a fluent API. Fluent clause methods such as
 
 ```go
 stmt := dql.Select(
-    dql.NewSelectColumn(column),
+    sst.NewColumnRef("users", "id"),
 ).From(source)
 ```
 
@@ -56,15 +57,15 @@ Elements such as `ColumnRef` and `TableRef` are structural AST nodes. Their
 configuration happens through constructor options:
 
 ```go
-column := elements.NewColumnRef(
+column := sst.NewColumnRef(
     "users",
     "id",
-    elements.WithColumnSchema("public"),
+    sst.WithColumnSchema("public"),
 )
 
-table := elements.NewTableRef(
+table := sst.NewTableRef(
     "users",
-    elements.WithTableSchema("public"),
+    sst.WithTableSchema("public"),
 )
 ```
 
@@ -93,9 +94,13 @@ The base contracts live in `internal/sst`:
 
 - `Node` defines visitor dispatch through `Accept`.
 - `SelectStatementNode` represents a SELECT statement root and extends `StatementNode`.
-- `SelectColumnNode` represents one selected item.
 - `ColumnRefNode` represents a qualified or unqualified column reference.
 - `TableRefNode` represents a qualified or unqualified table reference.
+- `ExpressionNode` is the base interface for expressions that render SQL
+  through `Expr()`.
+- `BindParamNode` is the specialized interface that extends `ExpressionNode`
+  with `Value() any` for runtime argument collection; the base expression
+  contract has no `Value()`.
 - `Visitor` defines compiler/traversal operations for these nodes.
 
 These interfaces describe behavior boundaries rather than marker-only types.
@@ -108,10 +113,16 @@ serve multiple concrete consumers.
 
 ```text
 VisitSelect      → SELECT and statement clauses
-VisitSelectColumn → selected expression
+VisitExpression  → expression rendering and argument specialization
 VisitColumnRef   → qualified column identifier
 VisitTableRef    → qualified table identifier
+VisitFromSource  → SELECT source traversal
+VisitJoin        → JOIN rendering
 ```
+
+Composite AST nodes own structural traversal through `Accept`. The compiler
+renders the current node; `VisitExpression` uses the agreed type switch to
+recognize `BinaryExpressionNode` and, once implemented, `BindParamNode`.
 
 The compiler returns:
 
@@ -129,16 +140,14 @@ separate responsibilities.
 Current package responsibilities are:
 
 ```text
-internal/sst      AST contracts and visitor interfaces
-internal/dql      DQL statement roots and SELECT clause nodes
-internal/elements Concrete shared AST elements
-internal/compiler SQL rendering and argument collection
+internal/sst       AST contracts and shared concrete expression/reference nodes
+internal/sst/dql   SELECT statement roots and source nodes
+internal/compiler  SQL rendering and argument collection
 ```
 
-`internal/elements` currently keeps the first concrete nodes together while the
-package is small. Once it becomes a grab bag, elements should be split into
-focused files such as `column_ref.go`, `table_ref.go`, `literal.go`, and
-`binary.go`.
+The current implementation keeps contracts and first concrete nodes together
+in `internal/sst`. They can be split into focused packages later if the
+boundary becomes stable and package-cycle pressure justifies it.
 
 ## Join naming and rendering
 
@@ -191,11 +200,13 @@ without treating the previous missing `On` as a builder-state error.
 
 The current slices include:
 
-1. model selected columns;
+1. model selected expressions;
 2. model one primary SELECT source with `TableRef`;
 3. compile the `FROM` clause;
 4. represent and traverse chained `Join` nodes, including missing `On`
-   conditions.
+   conditions;
+5. delegate binary-expression traversal from composite nodes to their
+   operands and render the current expression in the compiler.
 
 The next slices are:
 
@@ -211,20 +222,22 @@ depends on the target dialect. Compiler/dialect validation decides whether that
 form is allowed. A future `CrossJoin` will provide an explicit, portable
 representation for intentional cartesian products.
 
-## Literal, bind, and raw expression boundaries
+## Expression and bind boundaries
 
-The expression tree distinguishes three ways to represent a value or SQL text:
+The expression tree separates SQL rendering from runtime argument collection:
 
-- `BindParam(value)` is the safe runtime-value path. The compiler emits a
-  dialect placeholder and stores the value in `args`.
-- `InlineLiteral(...)` is an explicit request to render a SQL literal. The
-  dialect owns quoting and escaping for the supported value type.
-- `RawExpr(sql)` is an explicit trusted/raw SQL escape hatch and is not a
+- `ExpressionNode` is the output-only interface: it renders SQL through
+  `Expr()` and does not expose a runtime value. A literal expression belongs to
+  this capability.
+- `BindParamNode` is the planned specialization that extends
+  `ExpressionNode` with `Value() any`. Its visitor will write the dialect
+  placeholder and append the value to `args`.
+- `RawExpr(sql)` remains an explicit trusted/raw SQL escape hatch and is not a
   substitute for binding user input.
 
 A public comparison helper may accept a Go value for ergonomics, but it must
-normalize that value to `BindParam`. The AST must not silently turn request
-input into inline SQL.
+normalize that value to a concrete bind-parameter node implementing
+`BindParamNode`. The AST must not silently turn request input into inline SQL.
 
 ## TODO: cache compiled statement shapes
 
