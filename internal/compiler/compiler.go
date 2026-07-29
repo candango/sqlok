@@ -67,18 +67,41 @@ func (c *Compiler) VisitBinaryExpression(expr sst.BinaryExpressionNode) error {
 // traversal will continue from the source's attached join through Right.
 func (c *Compiler) VisitFromSource(source sst.FromSourceNode) error {
 	if table := source.Table(); table != nil {
-		return table.Accept(c)
+		if err := table.Accept(c); err != nil {
+			return err
+		}
 	}
 
 	if join := source.Join(); join != nil {
-		return join.Accept(c)
+		if err := join.Accept(c); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 // VisitJoin renders a JOIN relationship. Its Right source is the forward
 // traversal edge; Left is a back-reference and must not be traversed here.
-func (c *Compiler) VisitJoin(join sst.JoinNode) error {
+func (c *Compiler) VisitJoin(j sst.JoinNode) error {
+	c.parts = append(c.parts, " ", string(j.Type()), " ")
+
+	right := j.Right()
+	if table := right.Table(); table != nil {
+		if err := table.Accept(c); err != nil {
+			return err
+		}
+	}
+
+	if on := j.On(); on != nil {
+		c.parts = append(c.parts, " ON ")
+		if err := on.Accept(c); err != nil {
+			return err
+		}
+	}
+
+	if next := right.Join(); next != nil {
+		return next.Accept(c)
+	}
 	return nil
 }
 
@@ -93,6 +116,11 @@ func (c *Compiler) VisitColumnRef(column sst.ColumnRefNode) error {
 	}
 	parts = append(parts, column.Name())
 	c.parts = append(c.parts, strings.Join(parts, "."))
+	return nil
+}
+
+func (c *Compiler) VisitLiteral(l sst.LiteralNode) error {
+	c.parts = append(c.parts, l.Expr())
 	return nil
 }
 

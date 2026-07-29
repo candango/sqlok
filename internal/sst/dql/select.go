@@ -175,7 +175,7 @@ func NewJoin(left sst.FromSourceNode, right sst.FromSourceNode, options ...JoinO
 	j := &Join{
 		left:  left,
 		right: right,
-		jtype: sst.InnerJoin,
+		jtype: sst.Join,
 	}
 
 	for _, option := range options {

@@ -34,6 +34,31 @@ func NewBinaryExpression(left, right ExpressionNode, op ComparisonOperator) *Bin
 	}
 }
 
+type LiteralNode interface {
+	ExpressionNode
+	Value() any
+}
+
+type Literal struct {
+	value any
+}
+
+func NewLiteral(value any) *Literal {
+	return &Literal{value: value}
+}
+
+func (l *Literal) Value() any {
+	return l.value
+}
+
+func (l *Literal) Expr() string {
+	return fmt.Sprintf("%v", l.value)
+}
+
+func (l *Literal) Accept(v Visitor) error {
+	return v.VisitLiteral(l)
+}
+
 // Eq creates an equality expression.
 func Eq(left, right ExpressionNode) *BinaryExpression {
 	return NewBinaryExpression(left, right, Equal)

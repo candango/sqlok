@@ -421,22 +421,38 @@ context and is not traversed. The first construction/state error is stored on
 
 ## Go SQL builders and value operands
 
-Several Go SQL libraries accept ordinary Go values at their public condition or
-value-building boundary and convert them to bound SQL arguments:
+Several SQL libraries accept ordinary values at their public condition or
+value-building boundary, but they distinguish bound values from intentionally
+inline or raw SQL:
 
-- Squirrel documents `sq.Eq{"deleted_at": nil}` and value-bearing `Values(...)`
-  calls that produce SQL with placeholders and a separate argument list:
-  https://github.com/Masterminds/squirrel
-- GORM's `clause.Eq` stores `Column interface{}` and `Value interface{}` and
-  builds the comparison through its clause builder:
+- SQLAlchemy's `literal(value)` creates a bound parameter by default. Its
+  `literal_column(text)` and `text(text)` constructs are the explicit textual
+  or inline-SQL paths:
+  https://docs.sqlalchemy.org/en/20/core/sqlelement.html
+- GORM's `clause.Eq` stores `Column` and `Value`, and its clause builder binds
+  the value. `clause.Expr` carries SQL text plus `Vars`; the SQL text is raw,
+  while `Vars` are bound:
   https://pkg.go.dev/gorm.io/gorm/clause
+- Squirrel's `Eq`, `Gt`, `Like`, and `Expr(sql, args...)` preserve values in the
+  returned argument list. A raw `Expr` without bound arguments is the escape
+  hatch:
+  https://pkg.go.dev/github.com/Masterminds/squirrel
 
-The important boundary is not whether the public DSL accepts a Go value. The
-value must be normalized into a bind/value AST node and must not be
-concatenated into SQL text.
+Research conclusion for `sqlok`:
 
-This does not make a value operand equivalent to a column reference. For
-example, a map-style `Eq` API generally represents `column = bound value`; a
+```text
+BindParam(value)   → placeholder plus args
+InlineLiteral(...) → explicitly requested inline SQL constant
+RawExpr(sql)       → trusted/raw SQL escape hatch
+```
+
+A Go value from a request must not be silently converted to inline SQL. A
+public helper may accept it ergonomically, but it must normalize it to a
+`BindParam`. Inline literals need dialect-aware quoting and escaping, and raw
+SQL must remain a separate, explicit API.
+
+This does not make a value operand equivalent to a column reference. A
 column-to-column comparison such as `users.id = orders.user_id` needs an
 expression form that represents both operands as column nodes. `sqlok` should
-keep these cases distinct in its condition AST.
+keep column references, bound values, inline literals, and raw expressions
+distinct in its condition AST.

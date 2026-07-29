@@ -142,9 +142,10 @@ focused files such as `column_ref.go`, `table_ref.go`, `literal.go`, and
 
 ## Join naming and rendering
 
-The current SELECT slice has one concrete join node: `Join`. `InnerJoin` and
-`CrossJoin` are future join types/API variants and are not modeled as separate
-nodes yet.
+The current SELECT slice has one concrete join node: `Join`. The public
+`Join()` operation has inner-join semantics and renders the portable SQL token
+`JOIN`; a separate `InnerJoin()` API is not needed. `CrossJoin` remains a future
+explicit join type/API variant.
 
 `Join` may be created before its `On` condition is supplied. If another `Join`
 is added, the previous join remains in the AST with `On == nil`, and the new
@@ -167,7 +168,7 @@ FromSourceNode
 ├── Table: TableRef
 └── Join: Join
     ├── Left: FromSourceNode (back-reference)
-    ├── JoinType: INNER
+    ├── JoinType: JOIN (inner join semantics)
     ├── Right: FromSourceNode (next traversal point)
     └── On: Node
 ```
@@ -209,6 +210,21 @@ A `Join` with `On == nil` is retained in the AST because its syntactic validity
 depends on the target dialect. Compiler/dialect validation decides whether that
 form is allowed. A future `CrossJoin` will provide an explicit, portable
 representation for intentional cartesian products.
+
+## Literal, bind, and raw expression boundaries
+
+The expression tree distinguishes three ways to represent a value or SQL text:
+
+- `BindParam(value)` is the safe runtime-value path. The compiler emits a
+  dialect placeholder and stores the value in `args`.
+- `InlineLiteral(...)` is an explicit request to render a SQL literal. The
+  dialect owns quoting and escaping for the supported value type.
+- `RawExpr(sql)` is an explicit trusted/raw SQL escape hatch and is not a
+  substitute for binding user input.
+
+A public comparison helper may accept a Go value for ergonomics, but it must
+normalize that value to `BindParam`. The AST must not silently turn request
+input into inline SQL.
 
 ## TODO: cache compiled statement shapes
 

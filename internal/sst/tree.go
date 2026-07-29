@@ -56,4 +56,6 @@ type Visitor interface {
 	VisitTableRef(TableRefNode) error
 
 	VisitBinaryExpression(BinaryExpressionNode) error
+
+	VisitLiteral(LiteralNode) error
 }

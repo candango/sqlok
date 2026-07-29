@@ -30,6 +30,10 @@ func (v *fakeVisitor) VisitFromSource(s sst.FromSourceNode) error {
 	return nil
 }
 
+func (v *fakeVisitor) VisitLiteral(expr sst.LiteralNode) error {
+	return nil
+}
+
 func (v *fakeVisitor) VisitTableRef(s sst.TableRefNode) error {
 	return nil
 }
@@ -52,6 +56,7 @@ type traversingVisitor struct {
 	visitedJoin              bool
 	joinEvents               []string
 	visitedBinaryExpressions int
+	visitedLiterals          int
 }
 
 func (v *traversingVisitor) VisitSelect(s sst.SelectStatementNode) error {
@@ -104,6 +109,11 @@ func (v *traversingVisitor) VisitFromSource(s sst.FromSourceNode) error {
 		return join.Accept(v)
 	}
 
+	return nil
+}
+
+func (v *traversingVisitor) VisitLiteral(l sst.LiteralNode) error {
+	v.visitedLiterals++
 	return nil
 }
 
@@ -194,6 +204,29 @@ func TestSelectJoinTraversalChain(t *testing.T) {
 			"left:orders.id",
 			"binary:=",
 			"right:items.order_id",
+		}, visitor.joinEvents)
+	})
+
+	t.Run("should traverse through a join chain and resolve a literal", func(t *testing.T) {
+		visitor := &traversingVisitor{}
+
+		stmt := Select().
+			From(NewFromSource(sst.NewTableRef("users"))).
+			Join(NewFromSource(sst.NewTableRef("orders"))).
+			On(sst.Eq(sst.NewColumnRef("users", "id"), sst.NewLiteral(1)))
+
+		assert.NoError(t, stmt.Accept(visitor))
+		assert.Equal(t, 1, visitor.visitedBinaryExpressions)
+		assert.Equal(t, 1, visitor.visitedColumnRefs)
+		assert.Equal(t, 1, visitor.visitedLiterals)
+		assert.Equal(t, []string{
+			"users",
+			"join",
+			"orders",
+			"on",
+			"left:users.id",
+			"binary:=",
+			"right:1",
 		}, visitor.joinEvents)
 	})
 
