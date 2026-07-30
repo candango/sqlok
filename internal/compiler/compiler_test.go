@@ -37,9 +37,7 @@ func TestCompileSelectWithFromSource(t *testing.T) {
 	stmt := dql.Select(
 		sst.NewColumnRef("users", "id"),
 	).From(
-		dql.NewFromSource(
-			sst.NewTableRef("users", sst.WithTableSchema("public")),
-		),
+		sst.NewTableRef("users", sst.WithTableSchema("public")),
 	)
 
 	sql, args, err := Compile(stmt)
@@ -56,8 +54,8 @@ func TestCompileSelectWithFromAndJoin(t *testing.T) {
 			sst.NewColumnRef("users", "id"),
 			sst.NewColumnRef("items", "name"),
 		).
-			From(dql.NewFromSource(sst.NewTableRef("users"))).
-			Join(dql.NewFromSource(sst.NewTableRef("orders")))
+			From(sst.NewTableRef("users")).
+			Join(sst.NewTableRef("orders"))
 
 		sql, args, err := Compile(stmt)
 
@@ -71,10 +69,10 @@ func TestCompileSelectWithFromAndJoin(t *testing.T) {
 			sst.NewColumnRef("users", "id"),
 			sst.NewColumnRef("items", "name"),
 		).
-			From(dql.NewFromSource(sst.NewTableRef("users"))).
-			Join(dql.NewFromSource(sst.NewTableRef("orders"))).
+			From(sst.NewTableRef("users")).
+			Join(sst.NewTableRef("orders")).
 			On(sst.Eq(sst.NewColumnRef("users", "id"), sst.NewColumnRef("orders", "user_id"))).
-			Join(dql.NewFromSource(sst.NewTableRef("items"))).
+			Join(sst.NewTableRef("items")).
 			On(sst.Eq(sst.NewColumnRef("orders", "id"), sst.NewColumnRef("items", "order_id")))
 		sql, args, err := Compile(stmt)
 
@@ -93,8 +91,8 @@ func TestCompileSelectWithFromAndJoin(t *testing.T) {
 			sst.NewColumnRef("users", "id"),
 			sst.NewColumnRef("items", "name"),
 		).
-			From(dql.NewFromSource(sst.NewTableRef("users"))).
-			Join(dql.NewFromSource(sst.NewTableRef("orders"))).
+			From(sst.NewTableRef("users")).
+			Join(sst.NewTableRef("orders")).
 			On(sst.Eq(sst.NewColumnRef("users", "id"), sst.NewLiteral(1)))
 		sql, args, err := Compile(stmt)
 

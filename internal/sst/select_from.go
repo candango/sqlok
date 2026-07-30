@@ -17,7 +17,7 @@ const (
 // Join's Right source. The source's join link must not be traversed through
 // Join.Left, which is a back-reference used for context and validation.
 type FromSourceNode interface {
-	Node
+	ClauseNode
 
 	// Attach adds the next join to this source.
 	Attach(JoinNode) error

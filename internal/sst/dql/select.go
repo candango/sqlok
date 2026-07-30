@@ -8,7 +8,7 @@ import (
 
 // SelectStatement is the root node of a SELECT statement.
 type SelectStatement struct {
-	columns     []sst.ExpressionNode
+	columns     *sst.ExpressionList
 	source      sst.FromSourceNode
 	tailSource  sst.FromSourceNode
 	pendingJoin *Join
@@ -17,15 +17,38 @@ type SelectStatement struct {
 
 // Select creates a SELECT statement root with the provided projected expressions.
 func Select(columns ...sst.ExpressionNode) *SelectStatement {
-	s := &SelectStatement{
-		columns: columns,
+	s := &SelectStatement{}
+	if len(columns) > 0 {
+		s.columns = sst.NewExpressionList(columns...)
 	}
 	return s
 }
 
 // Accept dispatches the SELECT node to the provided visitor.
 func (s *SelectStatement) Accept(v sst.Visitor) error {
-	return v.VisitSelect(s)
+	if err := v.VisitStatement(s); err != nil {
+		return err
+	}
+	if s.columns != nil {
+		if err := s.columns.Accept(v); err != nil {
+			return err
+		}
+	}
+	if s.source != nil {
+		if err := v.VisitClause(s.source); err != nil {
+			return err
+		}
+
+		if err := s.source.Accept(v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Declaration returns the SELECT statement keyword.
+func (s *SelectStatement) Declaration() string {
+	return "SELECT"
 }
 
 // Err returns the first construction error recorded by the statement.
@@ -35,28 +58,29 @@ func (s *SelectStatement) Err() error {
 }
 
 // Columns returns the projected expressions in this SELECT statement.
-func (s *SelectStatement) Columns() []sst.ExpressionNode {
+func (s *SelectStatement) Columns() *sst.ExpressionList {
 	return s.columns
 }
 
 // From sets the primary FROM source and returns the SELECT statement.
-func (s *SelectStatement) From(source sst.FromSourceNode) *SelectStatement {
+func (s *SelectStatement) From(table sst.TableRefNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
-	if source == nil {
-		s.err = errors.New("FROM source cannot be nil")
+	if table == nil {
+		s.err = errors.New("FROM table cannot be nil")
 		return s
 	}
-	s.source = source
-	s.tailSource = source
+
+	s.source = NewFromSource(table)
+	s.tailSource = s.source
 	return s
 }
 
 // Join adds a source to the forward join chain and makes the new Join the
 // pending join. A later Join may supersede a pending join whose On condition
 // is still nil; dialect validation decides whether that SQL is allowed.
-func (s *SelectStatement) Join(source sst.FromSourceNode) *SelectStatement {
+func (s *SelectStatement) Join(table sst.TableRefNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -64,10 +88,11 @@ func (s *SelectStatement) Join(source sst.FromSourceNode) *SelectStatement {
 		s.err = errors.New("JOIN requires a FROM source")
 		return s
 	}
-	if source == nil {
-		s.err = errors.New("JOIN source cannot be nil")
+	if table == nil {
+		s.err = errors.New("JOIN table cannot be nil")
 		return s
 	}
+	source := NewFromSource(table)
 	j := NewJoin(s.tailSource, source)
 
 	if err := s.tailSource.Attach(j); err != nil {
@@ -130,6 +155,11 @@ func WithJoinNode(join sst.JoinNode) FromSourceOption {
 	return func(fs *FromSource) {
 		fs.join = join
 	}
+}
+
+// Declaration returns the FROM clause keyword.
+func (fs *FromSource) Declaration() string {
+	return "FROM"
 }
 
 // Attach stores the next join on this source. The join's Left reference points

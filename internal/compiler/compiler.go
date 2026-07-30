@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"errors"
 	"strings"
 
 	"github.com/candango/sqlok/internal/sst"
@@ -24,46 +23,25 @@ type Compiler struct {
 	args  []any
 }
 
-// VisitSelect renders a SELECT statement and visits its projected columns
-// and primary FROM source.
-func (c *Compiler) VisitSelect(stmt sst.SelectStatementNode) error {
-	c.parts = append(c.parts, "SELECT ")
-	for i, column := range stmt.Columns() {
-		if i > 0 {
-			c.parts = append(c.parts, ", ")
-		}
-		if err := column.Accept(c); err != nil {
-			return err
-		}
-	}
-	if source := stmt.Source(); source != nil {
-		c.parts = append(c.parts, " FROM ")
-		if err := source.Accept(c); err != nil {
-			return err
-		}
-	}
+// VisitStatement renders a statement declaration.
+func (c *Compiler) VisitStatement(stmt sst.StatementNode) error {
+	c.parts = append(c.parts, stmt.Declaration(), " ")
+	return nil
+}
+
+// VisitClause renders a clause declaration.
+func (c *Compiler) VisitClause(clause sst.ClauseNode) error {
+	c.parts = append(c.parts, " ", clause.Declaration(), " ")
 	return nil
 }
 
 // VisitExpression renders the current expression node. Composite binary
 // expressions have already traversed their operands before this call.
 func (c *Compiler) VisitExpression(expr sst.ExpressionNode) error {
-	switch e := expr.(type) {
-	case sst.BinaryExpressionNode:
-		switch e.Operator() {
-		case sst.Equal,
-			sst.NotEqual,
-			sst.GreaterThan,
-			sst.GreaterThanOrEqual,
-			sst.LessThan,
-			sst.LessThanOrEqual:
-			c.parts = append(c.parts, " ", string(e.Operator()), " ")
-		default:
-			return errors.New("unsupported comparison operator")
-		}
-	default:
-		c.parts = append(c.parts, e.Expr())
+	if param, ok := expr.(sst.BindParamNode); ok {
+		c.args = append(c.args, param.Value())
 	}
+	c.parts = append(c.parts, expr.Expr())
 	return nil
 }
 
@@ -120,6 +98,14 @@ func (c *Compiler) VisitColumnRef(column sst.ColumnRefNode) error {
 	}
 	parts = append(parts, column.Name())
 	c.parts = append(c.parts, strings.Join(parts, "."))
+	return nil
+}
+
+// VisitListSeparator renders a comma before every list item after the first.
+func (c *Compiler) VisitListSeparator(index int) error {
+	if index > 0 {
+		c.parts = append(c.parts, ", ")
+	}
 	return nil
 }
 

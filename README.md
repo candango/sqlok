@@ -6,16 +6,16 @@ current integration-test target.
 
 ## Overview
 
-**sqlok** provides a fluent query-builder prototype, a structured SELECT AST
-under development, session/identity-map behavior, and reflection-based schema
-introspection. The public root package currently exposes the session API; the
+**sqlok** provides a fluent query-builder prototype and a structured SELECT
+Semantic Tree under development, plus session/identity-map behavior and
+reflection-based schema introspection. The public root package currently exposes the session API; the
 legacy builder and schema loader remain under `internal/` while the public API
 is being consolidated.
 
 ## Features
 
 - **Query Builder** - Legacy fluent builder under `internal/`, being consolidated
-- **SELECT AST** - Structured statement/compiler path under active development
+- **SELECT SST** - SQL Semantic Tree and compiler path under active development
 - **Session API** - Identity-map and unit-of-work foundations in the root package
 - **Schema Management** - Internal table, field, and foreign-key definitions
 - **Parameterized Queries** - Builder support for PostgreSQL-style placeholders
@@ -54,7 +54,7 @@ func track(db *sql.DB, user *User) error {
 ```
 
 The legacy query builder and schema loader are repository-internal today. Their
-API is being migrated toward the SELECT AST/compiler path before becoming part
+API is being migrated toward the SELECT SST/compiler path before becoming part
 of the stable public package.
 
 ### Schema Definition
@@ -95,6 +95,9 @@ schema loader is currently internal and uses `database/sql`.
   - `DatabaseLoader` interface
   - `Loader` implementation
   - Context management
+
+- **`internal/sst/`** - SQL Semantic Tree contracts and concrete nodes
+  - Statements, clauses, expressions, references, and visitor traversal
 
 - **`session.go`** - Public session and identity-map foundation
 
@@ -140,9 +143,9 @@ GitHub Actions automatically tests against:
 ├── cmd/sqlok/          # CLI entry point
 ├── internal/
 │   ├── builder.go      # Legacy query builder
-│   ├── compiler/       # SQL compiler for the SELECT AST
+│   ├── compiler/       # SQL compiler for the SELECT SST
 │   ├── schema/         # Internal schema definitions
-│   ├── sst/            # AST contracts and concrete nodes
+│   ├── sst/            # SQL Semantic Tree contracts and concrete nodes
 │   ├── cli/            # CLI commands
 │   └── sqlok.go        # Internal database loading
 ├── session.go          # Public session API

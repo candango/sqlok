@@ -12,8 +12,15 @@ type fakeVisitor struct {
 	visitedColumnRefs int
 }
 
-func (v *fakeVisitor) VisitSelect(s sst.SelectStatementNode) error {
-	v.visitedSelect = true
+func (v *fakeVisitor) VisitStatement(s sst.StatementNode) error {
+	switch s.(type) {
+	case sst.SelectStatementNode:
+		v.visitedSelect = true
+	}
+	return nil
+}
+
+func (v *fakeVisitor) VisitClause(s sst.ClauseNode) error {
 	return nil
 }
 
@@ -27,6 +34,10 @@ func (v *fakeVisitor) VisitExpression(expr sst.ExpressionNode) error {
 }
 
 func (v *fakeVisitor) VisitFromSource(s sst.FromSourceNode) error {
+	return nil
+}
+
+func (v *fakeVisitor) VisitListSeparator(index int) error {
 	return nil
 }
 
@@ -52,29 +63,24 @@ type traversingVisitor struct {
 	visitedJoin              bool
 	joinEvents               []string
 	visitedBinaryExpressions int
+	bindParams               []any
 	visitedLiterals          int
 }
 
-func (v *traversingVisitor) VisitSelect(s sst.SelectStatementNode) error {
-	v.visitedSelect = true
-
-	for _, column := range s.Columns() {
-		if err := column.Accept(v); err != nil {
-			return err
-		}
+func (v *traversingVisitor) VisitStatement(s sst.StatementNode) error {
+	switch s.(type) {
+	case sst.SelectStatementNode:
+		v.visitedSelect = true
 	}
-
-	if source := s.Source(); source != nil {
-		if err := source.Accept(v); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
 func (v *traversingVisitor) VisitColumnRef(s sst.ColumnRefNode) error {
 	v.visitedColumnRefs++
+	return nil
+}
+
+func (v *traversingVisitor) VisitClause(s sst.ClauseNode) error {
 	return nil
 }
 
@@ -84,11 +90,17 @@ func (v *traversingVisitor) VisitExpression(expr sst.ExpressionNode) error {
 		v.visitedBinaryExpressions++
 		v.joinEvents = append(
 			v.joinEvents,
-			"binary:"+e.Left().Expr()+" "+string(e.Expr())+" "+e.Right().Expr(),
+			"binary:"+e.Left().Expr()+string(e.Expr())+e.Right().Expr(),
 		)
+	case sst.BindParamNode:
+		v.bindParams = append(v.bindParams, e.Value())
 	case *sst.Literal:
 		v.visitedLiterals++
 	}
+	return nil
+}
+
+func (v *traversingVisitor) VisitListSeparator(index int) error {
 	return nil
 }
 
@@ -152,10 +164,9 @@ func TestSelectTraversal(t *testing.T) {
 	visitor := &traversingVisitor{}
 	columnRef := sst.NewColumnRef("users", "id", sst.WithColumnSchema("public"))
 	tableRef := sst.NewTableRef("users")
-	fromSource := NewFromSource(tableRef)
-	stmt := Select(columnRef).From(fromSource)
+	stmt := Select(columnRef).From(tableRef)
 
-	assert.Len(t, stmt.Columns(), 1)
+	assert.Len(t, stmt.Columns().Items(), 1)
 	assert.NoError(t, stmt.Accept(visitor))
 
 	assert.True(t, visitor.visitedSelect)
@@ -169,10 +180,10 @@ func TestSelectJoinTraversalChain(t *testing.T) {
 		visitor := &traversingVisitor{}
 
 		stmt := Select().
-			From(NewFromSource(sst.NewTableRef("users"))).
-			Join(NewFromSource(sst.NewTableRef("orders"))).
+			From(sst.NewTableRef("users")).
+			Join(sst.NewTableRef("orders")).
 			On(sst.Eq(sst.NewColumnRef("users", "id"), sst.NewColumnRef("orders", "user_id"))).
-			Join(NewFromSource(sst.NewTableRef("items"))).
+			Join(sst.NewTableRef("items")).
 			On(sst.Eq(sst.NewColumnRef("orders", "id"), sst.NewColumnRef("items", "order_id")))
 
 		assert.NoError(t, stmt.Accept(visitor))
@@ -191,12 +202,34 @@ func TestSelectJoinTraversalChain(t *testing.T) {
 		}, visitor.joinEvents)
 	})
 
+	t.Run("should traverse through a join chain and resolve a bind param", func(t *testing.T) {
+		visitor := &traversingVisitor{}
+
+		stmt := Select().
+			From(sst.NewTableRef("users")).
+			Join(sst.NewTableRef("orders")).
+			On(sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(2)))
+
+		assert.NoError(t, stmt.Accept(visitor))
+		assert.Equal(t, 1, visitor.visitedBinaryExpressions)
+		assert.Equal(t, 1, visitor.visitedColumnRefs)
+		assert.Equal(t, 1, len(visitor.bindParams))
+		assert.Equal(t, []any{2}, visitor.bindParams)
+		assert.Equal(t, []string{
+			"users",
+			"join",
+			"orders",
+			"on",
+			"binary:users.id = ?",
+		}, visitor.joinEvents)
+	})
+
 	t.Run("should traverse through a join chain and resolve a literal", func(t *testing.T) {
 		visitor := &traversingVisitor{}
 
 		stmt := Select().
-			From(NewFromSource(sst.NewTableRef("users"))).
-			Join(NewFromSource(sst.NewTableRef("orders"))).
+			From(sst.NewTableRef("users")).
+			Join(sst.NewTableRef("orders")).
 			On(sst.Eq(sst.NewColumnRef("users", "id"), sst.NewLiteral(1)))
 
 		assert.NoError(t, stmt.Accept(visitor))
@@ -216,9 +249,9 @@ func TestSelectJoinTraversalChain(t *testing.T) {
 		visitor := &traversingVisitor{}
 
 		stmt := Select().
-			From(NewFromSource(sst.NewTableRef("users"))).
-			Join(NewFromSource(sst.NewTableRef("orders"))).
-			Join(NewFromSource(sst.NewTableRef("items"))).
+			From(sst.NewTableRef("users")).
+			Join(sst.NewTableRef("orders")).
+			Join(sst.NewTableRef("items")).
 			On(&fakeExpr{})
 
 		assert.NoError(t, stmt.Accept(visitor))
