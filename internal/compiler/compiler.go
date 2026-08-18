@@ -10,6 +10,10 @@ import (
 // The compiler currently implements SELECT rendering; additional statement
 // roots can use the same StatementNode boundary as their visitors are added.
 func Compile(stmt sst.StatementNode) (string, []any, error) {
+	if err := stmt.Err(); err != nil {
+		return "", nil, err
+	}
+
 	c := &Compiler{}
 	if err := stmt.Accept(c); err != nil {
 		return "", nil, err

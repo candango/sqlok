@@ -116,3 +116,13 @@ func TestCompileSelectWithFromAndJoin(t *testing.T) {
 		assert.Equal(t, []any{42, "second"}, args)
 	})
 }
+
+func TestCompileRejectSelectBuilderError(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).Join(sst.NewTableRef("order"))
+
+	_, _, err := Compile(stmt)
+
+	assert.EqualError(t, err, "JOIN requires a FROM source")
+}
