@@ -100,4 +100,19 @@ func TestCompileSelectWithFromAndJoin(t *testing.T) {
 		assert.Equal(t, "SELECT users.id, items.name FROM users JOIN orders ON users.id = 1", sql)
 		assert.Empty(t, args)
 	})
+
+	t.Run("should bind values be resolved in order", func(t *testing.T) {
+		stmt := dql.Select(
+			sst.NewColumnRef("users", "id"),
+			sst.NewBindParam(42),
+		).
+			From(sst.NewTableRef("users")).
+			Join(sst.NewTableRef("orders")).
+			On(sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam("second")))
+		sql, args, err := Compile(stmt)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "SELECT users.id, ? FROM users JOIN orders ON users.id = ?", sql)
+		assert.Equal(t, []any{42, "second"}, args)
+	})
 }
