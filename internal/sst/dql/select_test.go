@@ -60,6 +60,7 @@ type traversingVisitor struct {
 	visitedColumnRefs        int
 	visitedTableRef          bool
 	visitedFrom              bool
+	visitedWhere             bool
 	visitedJoin              bool
 	joinEvents               []string
 	visitedBinaryExpressions int
@@ -81,6 +82,9 @@ func (v *traversingVisitor) VisitColumnRef(s sst.ColumnRefNode) error {
 }
 
 func (v *traversingVisitor) VisitClause(s sst.ClauseNode) error {
+	if s.Declaration() == "WHERE" {
+		v.visitedWhere = true
+	}
 	return nil
 }
 
@@ -173,6 +177,25 @@ func TestSelectTraversal(t *testing.T) {
 	assert.Equal(t, 1, visitor.visitedColumnRefs)
 	assert.True(t, visitor.visitedFrom)
 	assert.True(t, visitor.visitedTableRef)
+}
+
+func TestSelectWhereTraversal(t *testing.T) {
+	visitor := &traversingVisitor{}
+	stmt := Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Where(
+		sst.Eq(
+			sst.NewColumnRef("users", "id"),
+			sst.NewBindParam(42),
+		),
+	)
+
+	assert.NoError(t, stmt.Accept(visitor))
+	assert.True(t, visitor.visitedWhere)
+	assert.Equal(t, 1, visitor.visitedBinaryExpressions)
+	assert.Equal(t, []any{42}, visitor.bindParams)
 }
 
 func TestSelectJoinTraversalChain(t *testing.T) {

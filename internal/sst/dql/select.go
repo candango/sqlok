@@ -13,6 +13,7 @@ type SelectStatement struct {
 	source      sst.FromSourceNode
 	tailSource  sst.FromSourceNode
 	pendingJoin *Join
+	where       *whereClause
 	err         error
 }
 
@@ -41,6 +42,15 @@ func (s *SelectStatement) Accept(v sst.Visitor) error {
 		}
 
 		if err := s.source.Accept(v); err != nil {
+			return err
+		}
+	}
+	if s.where != nil {
+		if err := v.VisitClause(s.where); err != nil {
+			return err
+		}
+
+		if err := s.where.Accept(v); err != nil {
 			return err
 		}
 	}
@@ -158,6 +168,20 @@ func (s *SelectStatement) addJoin(table sst.TableRefNode, jtype sst.JoinType) er
 	return nil
 }
 
+// Where adds a WHERE clause with the provided condition.
+func (s *SelectStatement) Where(condition sst.ExpressionNode) *SelectStatement {
+	if s.err != nil {
+		return s
+	}
+	if condition == nil {
+		s.err = errors.New("WHERE condition cannot be nil")
+		return s
+	}
+
+	s.where = newWhereClause(condition)
+	return s
+}
+
 // On completes the most recently created JOIN with its condition.
 func (s *SelectStatement) On(condition sst.Node) *SelectStatement {
 	if s.err != nil {
@@ -180,6 +204,22 @@ func (s *SelectStatement) On(condition sst.Node) *SelectStatement {
 // Source returns the primary FROM source.
 func (s *SelectStatement) Source() sst.FromSourceNode {
 	return s.source
+}
+
+type whereClause struct {
+	condition sst.ExpressionNode
+}
+
+func newWhereClause(condition sst.ExpressionNode) *whereClause {
+	return &whereClause{condition: condition}
+}
+
+func (w *whereClause) Declaration() string {
+	return "WHERE"
+}
+
+func (w *whereClause) Accept(v sst.Visitor) error {
+	return w.condition.Accept(v)
 }
 
 // FromSource represents a SELECT source table and its next attached join.

@@ -47,6 +47,25 @@ func TestCompileSelectWithFromSource(t *testing.T) {
 	assert.Empty(t, args)
 }
 
+func TestCompileSelectWithWhere(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Where(
+		sst.Eq(
+			sst.NewColumnRef("users", "id"),
+			sst.NewBindParam(42),
+		),
+	)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users WHERE users.id = ?", sql)
+	assert.Equal(t, []any{42}, args)
+}
+
 func TestCompileSelectWithFromAndJoin(t *testing.T) {
 
 	t.Run("should have from and join", func(t *testing.T) {
