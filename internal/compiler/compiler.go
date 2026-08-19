@@ -49,6 +49,20 @@ func (c *Compiler) VisitExpression(expr sst.ExpressionNode) error {
 	return nil
 }
 
+// VisitExpressionGroupStart renders the opening parenthesis of a grouped
+// expression.
+func (c *Compiler) VisitExpressionGroupStart() error {
+	c.parts = append(c.parts, "(")
+	return nil
+}
+
+// VisitExpressionGroupEnd renders the closing parenthesis of a grouped
+// expression.
+func (c *Compiler) VisitExpressionGroupEnd() error {
+	c.parts = append(c.parts, ")")
+	return nil
+}
+
 // VisitFromSource renders the base SELECT source reference. Forward JOIN
 // traversal will continue from the source's attached join through Right.
 func (c *Compiler) VisitFromSource(source sst.FromSourceNode) error {

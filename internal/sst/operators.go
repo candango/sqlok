@@ -40,12 +40,13 @@ const (
 	// ILike e NoILike go to dialects
 )
 
-type BooleanOperator uint8
+// BooleanOperator identifies a logical SQL operator.
+type BooleanOperator string
 
 const (
-	And BooleanOperator = iota
-	Or
-	Not
+	AndOperator BooleanOperator = "AND"
+	OrOperator  BooleanOperator = "OR"
+	NotOperator BooleanOperator = "NOT"
 )
 
 // TODO: those should be categorized correctly

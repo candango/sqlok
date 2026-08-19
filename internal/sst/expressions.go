@@ -12,6 +12,25 @@ type ExpressionNode interface {
 	Expr() string
 }
 
+const (
+	atomicExpressionPrecedence     = 4
+	comparisonExpressionPrecedence = 3
+	notExpressionPrecedence        = 3
+	andExpressionPrecedence        = 2
+	orExpressionPrecedence         = 1
+)
+
+type precedenceNode interface {
+	precedence() int
+}
+
+func expressionPrecedence(expr ExpressionNode) int {
+	if node, ok := expr.(precedenceNode); ok {
+		return node.precedence()
+	}
+	return atomicExpressionPrecedence
+}
+
 // ExpressionList represents a comma-separated list of expressions.
 type ExpressionList struct {
 	items []ExpressionNode
@@ -48,6 +67,14 @@ type BinaryExpressionNode interface {
 	Left() ExpressionNode
 	Operator() ComparisonOperator
 	Right() ExpressionNode
+}
+
+// LogicalExpressionNode represents a logical operation over one or more
+// expressions.
+type LogicalExpressionNode interface {
+	ExpressionNode
+	Operands() []ExpressionNode
+	Operator() BooleanOperator
 }
 
 // BindParamNode represents an expression backed by a runtime argument.
@@ -90,6 +117,10 @@ func (e *BinaryExpression) Expr() string {
 	return " " + string(e.op) + " "
 }
 
+func (e *BinaryExpression) precedence() int {
+	return comparisonExpressionPrecedence
+}
+
 // Accept traverses the operands and dispatches the binary expression between
 // them so visitors can render infix operators in the correct order.
 func (e *BinaryExpression) Accept(v Visitor) error {
@@ -125,6 +156,157 @@ func (e *BinaryExpression) Right() ExpressionNode {
 // Operator returns the comparison operator.
 func (e *BinaryExpression) Operator() ComparisonOperator {
 	return e.op
+}
+
+// LogicalExpression represents a logical operation over one or more
+// expressions.
+type LogicalExpression struct {
+	operands []ExpressionNode
+	op       BooleanOperator
+}
+
+// NewLogicalExpression creates a logical expression with the provided
+// operator and operands.
+func NewLogicalExpression(operator BooleanOperator, operands ...ExpressionNode) *LogicalExpression {
+	return &LogicalExpression{
+		operands: append([]ExpressionNode(nil), operands...),
+		op:       operator,
+	}
+}
+
+// And creates a logical AND expression from one or more operands.
+func And(operands ...ExpressionNode) *LogicalExpression {
+	return NewLogicalExpression(AndOperator, operands...)
+}
+
+// Or creates a logical OR expression from one or more operands.
+func Or(operands ...ExpressionNode) *LogicalExpression {
+	return NewLogicalExpression(OrOperator, operands...)
+}
+
+// Expr returns the boolean operator token for the logical expression.
+func (e *LogicalExpression) Expr() string {
+	return " " + string(e.op) + " "
+}
+
+// Accept traverses the operands and dispatches the logical operator between
+// them, grouping lower-precedence operands when required.
+func (e *LogicalExpression) Accept(v Visitor) error {
+	switch e.Operator() {
+	case AndOperator, OrOperator:
+	default:
+		return errors.New("unsupported boolean operator")
+	}
+	if len(e.operands) == 0 {
+		return fmt.Errorf("%s requires at least one expression", e.Operator())
+	}
+
+	for i, operand := range e.operands {
+		if i > 0 {
+			if err := v.VisitExpression(e); err != nil {
+				return err
+			}
+		}
+		if err := e.acceptOperand(v, operand); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *LogicalExpression) acceptOperand(v Visitor, operand ExpressionNode) error {
+	grouped := expressionPrecedence(operand) < e.precedence()
+	if grouped {
+		if err := v.VisitExpressionGroupStart(); err != nil {
+			return err
+		}
+	}
+
+	if err := operand.Accept(v); err != nil {
+		return err
+	}
+	if grouped {
+		return v.VisitExpressionGroupEnd()
+	}
+	return nil
+}
+
+func (e *LogicalExpression) precedence() int {
+	switch e.Operator() {
+	case AndOperator:
+		return andExpressionPrecedence
+	case OrOperator:
+		return orExpressionPrecedence
+	default:
+		return 0
+	}
+}
+
+// Operands returns the logical expression operands in traversal order.
+func (e *LogicalExpression) Operands() []ExpressionNode {
+	return e.operands
+}
+
+// Operator returns the boolean operator.
+func (e *LogicalExpression) Operator() BooleanOperator {
+	return e.op
+}
+
+// NotExpression represents boolean negation of one expression.
+type NotExpression struct {
+	operand ExpressionNode
+}
+
+// Not creates a logical NOT expression.
+func Not(operand ExpressionNode) *NotExpression {
+	return &NotExpression{operand: operand}
+}
+
+// Expr returns the NOT keyword and trailing space.
+func (e *NotExpression) Expr() string {
+	return "NOT "
+}
+
+// Accept renders NOT and traverses its operand, grouping compound expressions.
+func (e *NotExpression) Accept(v Visitor) error {
+	if e.operand == nil {
+		return errors.New("NOT requires an expression")
+	}
+	if err := v.VisitExpression(e); err != nil {
+		return err
+	}
+
+	grouped := isCompoundExpression(e.operand)
+	if grouped {
+		if err := v.VisitExpressionGroupStart(); err != nil {
+			return err
+		}
+	}
+	if err := e.operand.Accept(v); err != nil {
+		return err
+	}
+	if grouped {
+		return v.VisitExpressionGroupEnd()
+	}
+	return nil
+}
+
+func (e *NotExpression) precedence() int {
+	return notExpressionPrecedence
+}
+
+func isCompoundExpression(expr ExpressionNode) bool {
+	switch expr.(type) {
+	case BinaryExpressionNode, LogicalExpressionNode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Operand returns the expression being negated.
+func (e *NotExpression) Operand() ExpressionNode {
+	return e.operand
 }
 
 // BindParam represents a runtime argument rendered as a placeholder.

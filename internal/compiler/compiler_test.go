@@ -66,6 +66,93 @@ func TestCompileSelectWithWhere(t *testing.T) {
 	assert.Equal(t, []any{42}, args)
 }
 
+func TestCompileSelectWithLogicalWhere(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition sst.ExpressionNode
+		expected  string
+		args      []any
+	}{
+		{
+			name: "and accepts multiple operands",
+			condition: sst.And(
+				sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(42)),
+				sst.Eq(sst.NewColumnRef("users", "active"), sst.NewBindParam(true)),
+				sst.Eq(sst.NewColumnRef("users", "role"), sst.NewBindParam("admin")),
+			),
+			expected: "SELECT users.id FROM users WHERE users.id = ? AND users.active = ? AND users.role = ?",
+			args:     []any{42, true, "admin"},
+		},
+		{
+			name: "or accepts multiple operands",
+			condition: sst.Or(
+				sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(42)),
+				sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(7)),
+				sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(99)),
+			),
+			expected: "SELECT users.id FROM users WHERE users.id = ? OR users.id = ? OR users.id = ?",
+			args:     []any{42, 7, 99},
+		},
+		{
+			name: "and groups lower precedence or",
+			condition: sst.And(
+				sst.Or(
+					sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(42)),
+					sst.Eq(sst.NewColumnRef("users", "name"), sst.NewBindParam("sandy")),
+				),
+				sst.Eq(sst.NewColumnRef("users", "active"), sst.NewBindParam(true)),
+			),
+			expected: "SELECT users.id FROM users WHERE (users.id = ? OR users.name = ?) AND users.active = ?",
+			args:     []any{42, "sandy", true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stmt := dql.Select(
+				sst.NewColumnRef("users", "id"),
+			).From(
+				sst.NewTableRef("users"),
+			).Where(tt.condition)
+
+			sql, args, err := Compile(stmt)
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, sql)
+			assert.Equal(t, tt.args, args)
+		})
+	}
+}
+
+func TestCompileSelectRejectsEmptyLogicalExpression(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).Where(sst.And())
+
+	_, _, err := Compile(stmt)
+
+	assert.EqualError(t, err, "AND requires at least one expression")
+}
+
+func TestCompileSelectWithNot(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Where(
+		sst.Not(sst.Or(
+			sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(42)),
+			sst.Eq(sst.NewColumnRef("users", "name"), sst.NewBindParam("sandy")),
+		)),
+	)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users WHERE NOT (users.id = ? OR users.name = ?)", sql)
+	assert.Equal(t, []any{42, "sandy"}, args)
+}
+
 func TestCompileSelectWithFromAndJoin(t *testing.T) {
 
 	t.Run("should have from and join", func(t *testing.T) {

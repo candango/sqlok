@@ -33,6 +33,14 @@ func (v *fakeVisitor) VisitExpression(expr sst.ExpressionNode) error {
 	return nil
 }
 
+func (v *fakeVisitor) VisitExpressionGroupStart() error {
+	return nil
+}
+
+func (v *fakeVisitor) VisitExpressionGroupEnd() error {
+	return nil
+}
+
 func (v *fakeVisitor) VisitFromSource(s sst.FromSourceNode) error {
 	return nil
 }
@@ -64,6 +72,8 @@ type traversingVisitor struct {
 	visitedJoin              bool
 	joinEvents               []string
 	visitedBinaryExpressions int
+	visitedLogicalOperators  int
+	visitedNotExpressions    int
 	bindParams               []any
 	visitedLiterals          int
 }
@@ -96,11 +106,23 @@ func (v *traversingVisitor) VisitExpression(expr sst.ExpressionNode) error {
 			v.joinEvents,
 			"binary:"+e.Left().Expr()+string(e.Expr())+e.Right().Expr(),
 		)
+	case sst.LogicalExpressionNode:
+		v.visitedLogicalOperators++
+	case *sst.NotExpression:
+		v.visitedNotExpressions++
 	case sst.BindParamNode:
 		v.bindParams = append(v.bindParams, e.Value())
 	case *sst.Literal:
 		v.visitedLiterals++
 	}
+	return nil
+}
+
+func (v *traversingVisitor) VisitExpressionGroupStart() error {
+	return nil
+}
+
+func (v *traversingVisitor) VisitExpressionGroupEnd() error {
 	return nil
 }
 
@@ -194,6 +216,45 @@ func TestSelectWhereTraversal(t *testing.T) {
 
 	assert.NoError(t, stmt.Accept(visitor))
 	assert.True(t, visitor.visitedWhere)
+	assert.Equal(t, 1, visitor.visitedBinaryExpressions)
+	assert.Equal(t, []any{42}, visitor.bindParams)
+}
+
+func TestSelectLogicalWhereTraversal(t *testing.T) {
+	visitor := &traversingVisitor{}
+	stmt := Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Where(
+		sst.And(
+			sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(42)),
+			sst.Eq(sst.NewColumnRef("users", "active"), sst.NewBindParam(true)),
+			sst.Eq(sst.NewColumnRef("users", "role"), sst.NewBindParam("admin")),
+		),
+	)
+
+	assert.NoError(t, stmt.Accept(visitor))
+	assert.Equal(t, 2, visitor.visitedLogicalOperators)
+	assert.Equal(t, 3, visitor.visitedBinaryExpressions)
+	assert.Equal(t, []any{42, true, "admin"}, visitor.bindParams)
+}
+
+func TestSelectNotTraversal(t *testing.T) {
+	visitor := &traversingVisitor{}
+	stmt := Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Where(
+		sst.Not(sst.Eq(
+			sst.NewColumnRef("users", "id"),
+			sst.NewBindParam(42),
+		)),
+	)
+
+	assert.NoError(t, stmt.Accept(visitor))
+	assert.Equal(t, 1, visitor.visitedNotExpressions)
 	assert.Equal(t, 1, visitor.visitedBinaryExpressions)
 	assert.Equal(t, []any{42}, visitor.bindParams)
 }

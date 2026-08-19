@@ -72,6 +72,12 @@ type Visitor interface {
 	// VisitExpression visits an expression node for SQL rendering.
 	VisitExpression(ExpressionNode) error
 
+	// VisitExpressionGroupStart renders the start of a grouped expression.
+	VisitExpressionGroupStart() error
+
+	// VisitExpressionGroupEnd renders the end of a grouped expression.
+	VisitExpressionGroupEnd() error
+
 	// VisitFromSource visits a SELECT source and its attached joins.
 	VisitFromSource(FromSourceNode) error
 
