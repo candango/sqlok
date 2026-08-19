@@ -2,6 +2,7 @@ package dql
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/candango/sqlok/internal/sst"
 )
@@ -77,31 +78,48 @@ func (s *SelectStatement) From(table sst.TableRefNode) *SelectStatement {
 	return s
 }
 
-// Join adds a source to the forward join chain and makes the new Join the
-// pending join. A later Join may supersede a pending join whose On condition
-// is still nil; dialect validation decides whether that SQL is allowed.
+// Join adds a source with the JOIN type.
 func (s *SelectStatement) Join(table sst.TableRefNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
-	if s.tailSource == nil {
-		s.err = errors.New("JOIN requires a FROM source")
-		return s
-	}
-	if table == nil {
-		s.err = errors.New("JOIN table cannot be nil")
-		return s
-	}
-	source := NewFromSource(table)
-	j := NewJoin(s.tailSource, source)
-
-	if err := s.tailSource.Attach(j); err != nil {
+	if err := s.addJoin(table, sst.Join); err != nil {
 		s.err = err
 		return s
 	}
+	return s
+}
+
+// InnerJoin adds a source with the INNER JOIN type.
+func (s *SelectStatement) InnerJoin(table sst.TableRefNode) *SelectStatement {
+	if s.err != nil {
+		return s
+	}
+	if err := s.addJoin(table, sst.InnerJoin); err != nil {
+		s.err = err
+		return s
+	}
+	return s
+}
+
+// addJoin appends a source with the requested SQL join type, attaches the
+// resulting join to the current source, advances the forward chain, and marks
+// the join as pending for a subsequent On condition.
+func (s *SelectStatement) addJoin(table sst.TableRefNode, jtype sst.JoinType) error {
+	if s.tailSource == nil {
+		return fmt.Errorf("%s requires a FROM source", jtype)
+	}
+	if table == nil {
+		return fmt.Errorf("%s table cannot be nil", jtype)
+	}
+	source := NewFromSource(table)
+	j := NewJoin(s.tailSource, source, WithJoinType(jtype))
+	if err := s.tailSource.Attach(j); err != nil {
+		return err
+	}
 	s.pendingJoin = j
 	s.tailSource = source
-	return s
+	return nil
 }
 
 // On completes the most recently created JOIN with its condition.

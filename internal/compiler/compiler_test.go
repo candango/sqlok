@@ -64,6 +64,23 @@ func TestCompileSelectWithFromAndJoin(t *testing.T) {
 		assert.Empty(t, args)
 	})
 
+	t.Run("should have an explicit inner join", func(t *testing.T) {
+		stmt := dql.Select(
+			sst.NewColumnRef("users", "id"),
+		).
+			From(sst.NewTableRef("users")).
+			InnerJoin(sst.NewTableRef("orders")).
+			On(sst.Eq(
+				sst.NewColumnRef("users", "id"),
+				sst.NewColumnRef("orders", "user_id"),
+			))
+		sql, args, err := Compile(stmt)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "SELECT users.id FROM users INNER JOIN orders ON users.id = orders.user_id", sql)
+		assert.Empty(t, args)
+	})
+
 	t.Run("should have from, join chain with on clauses", func(t *testing.T) {
 		stmt := dql.Select(
 			sst.NewColumnRef("users", "id"),
