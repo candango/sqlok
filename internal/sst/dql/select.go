@@ -102,6 +102,42 @@ func (s *SelectStatement) InnerJoin(table sst.TableRefNode) *SelectStatement {
 	return s
 }
 
+// CrossJoin adds a source with the CROSS JOIN type.
+func (s *SelectStatement) CrossJoin(table sst.TableRefNode) *SelectStatement {
+	if s.err != nil {
+		return s
+	}
+	if err := s.addJoin(table, sst.CrossJoin); err != nil {
+		s.err = err
+		return s
+	}
+	return s
+}
+
+// LeftJoin adds a source with the LEFT JOIN type.
+func (s *SelectStatement) LeftJoin(table sst.TableRefNode) *SelectStatement {
+	if s.err != nil {
+		return s
+	}
+	if err := s.addJoin(table, sst.LeftJoin); err != nil {
+		s.err = err
+		return s
+	}
+	return s
+}
+
+// RightJoin adds a source with the RIGHT JOIN type.
+func (s *SelectStatement) RightJoin(table sst.TableRefNode) *SelectStatement {
+	if s.err != nil {
+		return s
+	}
+	if err := s.addJoin(table, sst.RightJoin); err != nil {
+		s.err = err
+		return s
+	}
+	return s
+}
+
 // addJoin appends a source with the requested SQL join type, attaches the
 // resulting join to the current source, advances the forward chain, and marks
 // the join as pending for a subsequent On condition.

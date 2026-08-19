@@ -81,6 +81,53 @@ func TestCompileSelectWithFromAndJoin(t *testing.T) {
 		assert.Empty(t, args)
 	})
 
+	t.Run("should have an explicit cross join", func(t *testing.T) {
+		stmt := dql.Select(
+			sst.NewColumnRef("users", "id"),
+		).
+			From(sst.NewTableRef("users")).
+			CrossJoin(sst.NewTableRef("orders"))
+		sql, args, err := Compile(stmt)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "SELECT users.id FROM users CROSS JOIN orders", sql)
+		assert.Empty(t, args)
+	})
+
+	t.Run("should have an explicit left join", func(t *testing.T) {
+		stmt := dql.Select(
+			sst.NewColumnRef("users", "id"),
+		).
+			From(sst.NewTableRef("users")).
+			LeftJoin(sst.NewTableRef("orders")).
+			On(sst.Eq(
+				sst.NewColumnRef("users", "id"),
+				sst.NewColumnRef("orders", "user_id"),
+			))
+		sql, args, err := Compile(stmt)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "SELECT users.id FROM users LEFT JOIN orders ON users.id = orders.user_id", sql)
+		assert.Empty(t, args)
+	})
+
+	t.Run("should have an explicit right join", func(t *testing.T) {
+		stmt := dql.Select(
+			sst.NewColumnRef("users", "id"),
+		).
+			From(sst.NewTableRef("users")).
+			RightJoin(sst.NewTableRef("orders")).
+			On(sst.Eq(
+				sst.NewColumnRef("users", "id"),
+				sst.NewColumnRef("orders", "user_id"),
+			))
+		sql, args, err := Compile(stmt)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "SELECT users.id FROM users RIGHT JOIN orders ON users.id = orders.user_id", sql)
+		assert.Empty(t, args)
+	})
+
 	t.Run("should have from, join chain with on clauses", func(t *testing.T) {
 		stmt := dql.Select(
 			sst.NewColumnRef("users", "id"),
