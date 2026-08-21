@@ -36,6 +36,8 @@ type ExpressionList struct {
 	items []ExpressionNode
 }
 
+var _ ListNode[ExpressionNode] = (*ExpressionList)(nil)
+
 // NewExpressionList creates an expression list.
 func NewExpressionList(items ...ExpressionNode) *ExpressionList {
 	return &ExpressionList{
@@ -91,6 +93,8 @@ type BinaryExpression struct {
 	op    ComparisonOperator
 	right ExpressionNode
 }
+
+var _ BinaryExpressionNode = (*BinaryExpression)(nil)
 
 // NewBinaryExpression creates a binary expression with the provided operands
 // and comparison operator.
@@ -164,6 +168,8 @@ type LogicalExpression struct {
 	operands []ExpressionNode
 	op       BooleanOperator
 }
+
+var _ LogicalExpressionNode = (*LogicalExpression)(nil)
 
 // NewLogicalExpression creates a logical expression with the provided
 // operator and operands.
@@ -257,6 +263,8 @@ type NotExpression struct {
 	operand ExpressionNode
 }
 
+var _ ExpressionNode = (*NotExpression)(nil)
+
 // Not creates a logical NOT expression.
 func Not(operand ExpressionNode) *NotExpression {
 	return &NotExpression{operand: operand}
@@ -314,6 +322,8 @@ type BindParam struct {
 	value any
 }
 
+var _ BindParamNode = (*BindParam)(nil)
+
 // NewBindParam creates a bind-parameter expression for the provided value.
 func NewBindParam(value any) *BindParam {
 	return &BindParam{value: value}
@@ -338,6 +348,8 @@ func (p *BindParam) Value() any {
 type Literal struct {
 	value any
 }
+
+var _ ExpressionNode = (*Literal)(nil)
 
 // NewLiteral creates a literal expression from the provided value.
 func NewLiteral(value any) *Literal {

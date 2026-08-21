@@ -218,6 +218,8 @@ type whereClause struct {
 	condition sst.ExpressionNode
 }
 
+var _ sst.ClauseNode = (*whereClause)(nil)
+
 func newWhereClause(condition sst.ExpressionNode) *whereClause {
 	return &whereClause{condition: condition}
 }
@@ -235,6 +237,8 @@ type FromSource struct {
 	table sst.TableRefNode
 	join  sst.JoinNode
 }
+
+var _ sst.FromSourceNode = (*FromSource)(nil)
 
 // FromSourceOption configures a FromSource during construction.
 type FromSourceOption func(fs *FromSource)
@@ -298,6 +302,8 @@ type Join struct {
 	jtype sst.JoinType
 	on    sst.Node
 }
+
+var _ sst.JoinNode = (*Join)(nil)
 
 // JoinOption configures a Join during construction.
 type JoinOption func(j *Join)

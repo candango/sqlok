@@ -27,6 +27,8 @@ type Compiler struct {
 	args  []any
 }
 
+var _ sst.Visitor = (*Compiler)(nil)
+
 // VisitStatement renders a statement declaration.
 func (c *Compiler) VisitStatement(stmt sst.StatementNode) error {
 	c.parts = append(c.parts, stmt.Declaration(), " ")

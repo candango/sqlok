@@ -14,6 +14,11 @@ type ColumnRef struct {
 	table  string
 }
 
+var (
+	_ ColumnRefNode  = (*ColumnRef)(nil)
+	_ ExpressionNode = (*ColumnRef)(nil)
+)
+
 // ColumnRefOption configures a column reference during construction.
 type ColumnRefOption func(*ColumnRef)
 
@@ -76,6 +81,8 @@ type TableRef struct {
 	name   string
 	schema string
 }
+
+var _ TableRefNode = (*TableRef)(nil)
 
 // TableRefOption configures a table reference during construction.
 type TableRefOption func(*TableRef)
