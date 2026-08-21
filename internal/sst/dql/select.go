@@ -7,7 +7,9 @@ import (
 	"github.com/candango/sqlok/internal/sst"
 )
 
-// SelectStatement is the root node of a SELECT statement.
+// SelectStatement is the concrete fluent builder and semantic root node of a
+// SELECT statement. It implements sst.SelectBuilder for construction and
+// sst.SelectStatementNode for traversal and compilation.
 type SelectStatement struct {
 	columns     *sst.ExpressionList
 	source      sst.FromSourceNode
@@ -17,7 +19,10 @@ type SelectStatement struct {
 	err         error
 }
 
-// Select creates a SELECT statement root with the provided projected expressions.
+var _ sst.SelectBuilder = (*SelectStatement)(nil)
+
+// Select creates a concrete SELECT builder with the provided projected
+// expressions.
 func Select(columns ...sst.ExpressionNode) *SelectStatement {
 	s := &SelectStatement{}
 	if len(columns) > 0 {
@@ -74,7 +79,7 @@ func (s *SelectStatement) Columns() *sst.ExpressionList {
 }
 
 // From sets the primary FROM source and returns the SELECT statement.
-func (s *SelectStatement) From(table sst.TableRefNode) *SelectStatement {
+func (s *SelectStatement) From(table sst.TableRefNode) sst.SelectBuilder {
 	if s.err != nil {
 		return s
 	}
@@ -89,7 +94,7 @@ func (s *SelectStatement) From(table sst.TableRefNode) *SelectStatement {
 }
 
 // Join adds a source with the JOIN type.
-func (s *SelectStatement) Join(table sst.TableRefNode) *SelectStatement {
+func (s *SelectStatement) Join(table sst.TableRefNode) sst.SelectBuilder {
 	if s.err != nil {
 		return s
 	}
@@ -101,7 +106,7 @@ func (s *SelectStatement) Join(table sst.TableRefNode) *SelectStatement {
 }
 
 // InnerJoin adds a source with the INNER JOIN type.
-func (s *SelectStatement) InnerJoin(table sst.TableRefNode) *SelectStatement {
+func (s *SelectStatement) InnerJoin(table sst.TableRefNode) sst.SelectBuilder {
 	if s.err != nil {
 		return s
 	}
@@ -113,7 +118,7 @@ func (s *SelectStatement) InnerJoin(table sst.TableRefNode) *SelectStatement {
 }
 
 // CrossJoin adds a source with the CROSS JOIN type.
-func (s *SelectStatement) CrossJoin(table sst.TableRefNode) *SelectStatement {
+func (s *SelectStatement) CrossJoin(table sst.TableRefNode) sst.SelectBuilder {
 	if s.err != nil {
 		return s
 	}
@@ -125,7 +130,7 @@ func (s *SelectStatement) CrossJoin(table sst.TableRefNode) *SelectStatement {
 }
 
 // LeftJoin adds a source with the LEFT JOIN type.
-func (s *SelectStatement) LeftJoin(table sst.TableRefNode) *SelectStatement {
+func (s *SelectStatement) LeftJoin(table sst.TableRefNode) sst.SelectBuilder {
 	if s.err != nil {
 		return s
 	}
@@ -137,7 +142,7 @@ func (s *SelectStatement) LeftJoin(table sst.TableRefNode) *SelectStatement {
 }
 
 // RightJoin adds a source with the RIGHT JOIN type.
-func (s *SelectStatement) RightJoin(table sst.TableRefNode) *SelectStatement {
+func (s *SelectStatement) RightJoin(table sst.TableRefNode) sst.SelectBuilder {
 	if s.err != nil {
 		return s
 	}
@@ -169,7 +174,7 @@ func (s *SelectStatement) addJoin(table sst.TableRefNode, jtype sst.JoinType) er
 }
 
 // Where adds a WHERE clause with the provided condition.
-func (s *SelectStatement) Where(condition sst.ExpressionNode) *SelectStatement {
+func (s *SelectStatement) Where(condition sst.ExpressionNode) sst.SelectBuilder {
 	if s.err != nil {
 		return s
 	}
@@ -186,7 +191,7 @@ func (s *SelectStatement) Where(condition sst.ExpressionNode) *SelectStatement {
 }
 
 // On completes the most recently created JOIN with its condition.
-func (s *SelectStatement) On(condition sst.Node) *SelectStatement {
+func (s *SelectStatement) On(condition sst.Node) sst.SelectBuilder {
 	if s.err != nil {
 		return s
 	}
