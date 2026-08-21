@@ -220,6 +220,30 @@ func TestSelectWhereTraversal(t *testing.T) {
 	assert.Equal(t, []any{42}, visitor.bindParams)
 }
 
+func TestSelectRepeatedWhereTraversal(t *testing.T) {
+	visitor := &traversingVisitor{}
+	stmt := Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Where(
+		sst.Eq(
+			sst.NewColumnRef("users", "id"),
+			sst.NewBindParam(42),
+		),
+	).Where(
+		sst.Eq(
+			sst.NewColumnRef("users", "active"),
+			sst.NewBindParam(true),
+		),
+	)
+
+	assert.NoError(t, stmt.Accept(visitor))
+	assert.True(t, visitor.visitedWhere)
+	assert.Equal(t, 2, visitor.visitedBinaryExpressions)
+	assert.Equal(t, []any{42, true}, visitor.bindParams)
+}
+
 func TestSelectLogicalWhereTraversal(t *testing.T) {
 	visitor := &traversingVisitor{}
 	stmt := Select(

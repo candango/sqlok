@@ -66,6 +66,30 @@ func TestCompileSelectWithWhere(t *testing.T) {
 	assert.Equal(t, []any{42}, args)
 }
 
+func TestCompileSelectWithRepeatedWhere(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Where(
+		sst.Eq(
+			sst.NewColumnRef("users", "id"),
+			sst.NewBindParam(42),
+		),
+	).Where(
+		sst.Eq(
+			sst.NewColumnRef("users", "active"),
+			sst.NewBindParam(true),
+		),
+	)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users WHERE users.id = ? AND users.active = ?", sql)
+	assert.Equal(t, []any{42, true}, args)
+}
+
 func TestCompileSelectWithLogicalWhere(t *testing.T) {
 	tests := []struct {
 		name      string

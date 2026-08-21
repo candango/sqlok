@@ -177,6 +177,9 @@ func (s *SelectStatement) Where(condition sst.ExpressionNode) *SelectStatement {
 		s.err = errors.New("WHERE condition cannot be nil")
 		return s
 	}
+	if s.where != nil {
+		condition = sst.And(s.where.condition, condition)
+	}
 
 	s.where = newWhereClause(condition)
 	return s
