@@ -16,6 +16,7 @@ type SelectStatement struct {
 	tailSource  sst.FromSourceNode
 	pendingJoin *Join
 	where       *whereClause
+	orderItems  []*sst.OrderItem
 	err         error
 }
 
@@ -206,6 +207,24 @@ func (s *SelectStatement) On(condition sst.Node) sst.SelectBuilder {
 
 	s.pendingJoin.SetOn(condition)
 	s.pendingJoin = nil
+	return s
+}
+
+// OrderBy appends ORDER BY items to the SELECT statement.
+func (s *SelectStatement) OrderBy(items ...*sst.OrderItem) sst.SelectBuilder {
+	if s.err != nil {
+		return s
+	}
+	s.orderItems = append(s.orderItems, items...)
+	return s
+}
+
+// ClearOrderBy removes all ORDER BY items from the SELECT statement.
+func (s *SelectStatement) ClearOrderBy() sst.SelectBuilder {
+	if s.err != nil {
+		return s
+	}
+	s.orderItems = nil
 	return s
 }
 
