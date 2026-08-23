@@ -78,6 +78,7 @@ func (e *fakeExpr) Accept(v sst.Visitor) error {
 type traversingVisitor struct {
 	visitedSelect            bool
 	visitedDistinct          bool
+	visitedGroupBy           bool
 	visitedColumnRefs        int
 	visitedTableRef          bool
 	visitedFrom              bool
@@ -117,6 +118,8 @@ func (v *traversingVisitor) VisitClause(s sst.ClauseNode) error {
 	switch s.Declaration() {
 	case "WHERE":
 		v.visitedWhere = true
+	case "GROUP BY":
+		v.visitedGroupBy = true
 	case "ORDER BY":
 		v.visitedOrderBy = true
 	case "LIMIT":
@@ -242,6 +245,21 @@ func TestSelectDistinctTraversal(t *testing.T) {
 	assert.NoError(t, stmt.Accept(visitor))
 	assert.True(t, visitor.visitedSelect)
 	assert.True(t, visitor.visitedDistinct)
+}
+
+func TestSelectGroupByTraversal(t *testing.T) {
+	visitor := &traversingVisitor{}
+	stmt := Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).GroupBy(
+		sst.NewColumnRef("users", "id"),
+		sst.NewColumnRef("users", "name"),
+	)
+
+	assert.NoError(t, stmt.Accept(visitor))
+	assert.True(t, visitor.visitedGroupBy)
 }
 
 func TestSelectTraversal(t *testing.T) {

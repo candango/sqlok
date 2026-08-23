@@ -46,6 +46,9 @@ type SelectBuilder interface {
 	// Distinct marks the SELECT statement to remove duplicate rows.
 	Distinct() SelectBuilder
 
+	// GroupBy adds expressions to the GROUP BY clause.
+	GroupBy(...ExpressionNode) SelectBuilder
+
 	// OrderBy appends ORDER BY items to the SELECT statement.
 	OrderBy(...OrderItemNode) SelectBuilder
 

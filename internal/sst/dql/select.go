@@ -17,6 +17,7 @@ type SelectStatement struct {
 	tailSource  sst.FromSourceNode
 	pendingJoin *Join
 	where       *whereClause
+	groupBy     *groupByClause
 	orderBy     *orderByClause
 	limit       *limitClause
 	offset      *offsetClause
@@ -60,6 +61,14 @@ func (s *SelectStatement) Accept(v sst.Visitor) error {
 		}
 
 		if err := s.where.Accept(v); err != nil {
+			return err
+		}
+	}
+	if s.groupBy != nil && len(s.groupBy.items.Items()) > 0 {
+		if err := v.VisitClause(s.groupBy); err != nil {
+			return err
+		}
+		if err := s.groupBy.Accept(v); err != nil {
 			return err
 		}
 	}
@@ -249,6 +258,20 @@ func (s *SelectStatement) On(condition sst.Node) sst.SelectBuilder {
 	return s
 }
 
+// GroupBy adds expressions to the GROUP BY clause.
+func (s *SelectStatement) GroupBy(expressions ...sst.ExpressionNode) sst.SelectBuilder {
+	if s.err != nil {
+		return s
+	}
+	if s.groupBy == nil {
+		s.groupBy = newGroupByClause(
+			sst.NewCommaSeparatedList[sst.ExpressionNode](),
+		)
+	}
+	s.groupBy.items.Append(expressions...)
+	return s
+}
+
 // OrderBy appends ORDER BY items to the SELECT statement.
 func (s *SelectStatement) OrderBy(items ...sst.OrderItemNode) sst.SelectBuilder {
 	if s.err != nil {
@@ -325,6 +348,24 @@ func (w *whereClause) Declaration() string {
 
 func (w *whereClause) Accept(v sst.Visitor) error {
 	return w.condition.Accept(v)
+}
+
+type groupByClause struct {
+	items *sst.CommaSeparatedList[sst.ExpressionNode]
+}
+
+var _ sst.ClauseNode = (*groupByClause)(nil)
+
+func newGroupByClause(items *sst.CommaSeparatedList[sst.ExpressionNode]) *groupByClause {
+	return &groupByClause{items: items}
+}
+
+func (c *groupByClause) Declaration() string {
+	return "GROUP BY"
+}
+
+func (c *groupByClause) Accept(v sst.Visitor) error {
+	return c.items.Accept(v)
 }
 
 type orderByClause struct {

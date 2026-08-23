@@ -22,6 +22,23 @@ func TestCompileSelectDistinct(t *testing.T) {
 	assert.Empty(t, args)
 }
 
+func TestCompileSelectGroupBy(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).GroupBy(
+		sst.NewColumnRef("users", "id"),
+		sst.NewColumnRef("users", "name"),
+	)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users GROUP BY users.id, users.name", sql)
+	assert.Empty(t, args)
+}
+
 func TestCompileSelectWithColumnRef(t *testing.T) {
 	stmt := dql.Select(
 		sst.NewColumnRef("users", "id", sst.WithColumnSchema("public")),
