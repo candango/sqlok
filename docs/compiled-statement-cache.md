@@ -141,25 +141,47 @@ state may change, but the published artifact is replaced rather than mutated.
 
 ## Relation to MyFuses
 
-The correspondence is:
+The MyFuses source review shows a three-stage application lifecycle:
 
 ```text
-MyFuses:
-  XML/circuit definition
-    → parse/build application objects
-    → generate parsed PHP files
-    → include cached PHP on later requests
+load:
+  XML or cached data → structured arrays
 
-SQLok:
-  DSL/model statement
-    → build SST
-    → compile SQL template and bind layout
-    → execute cached shape on later calls
+build:
+  structured arrays → application/circuit/action/verb objects
+
+store:
+  object tree → generated PHP and serialized data artifacts
 ```
 
-MyFuses also tracks source modification times and rebuilds stale circuit
-artifacts. SQLok will need the equivalent invalidation signals for compiler,
-dialect, model metadata, and schema changes.
+The lifecycle is lazy by unit: `checkCircuit()` loads and builds a circuit when
+it is first touched. A warm request includes the generated PHP artifact, while
+some request/application work may still be reconstructed. The phase constants
+and global phase state are request orchestration; they are not an explicit
+artifact state machine.
+
+SQLok does not have a direct `load → build` equivalent because Go code and the
+fluent builder already create and hydrate the SST tree. The closer SQLok
+lifecycle is:
+
+```text
+register/derive:
+  Go builder or model descriptor → SST statement
+
+store/publish:
+  SST → immutable CompiledStatement → registry/cache
+
+warm request:
+  external PlanID → CompiledStatement → Bind(args) → Executor
+
+invalidate:
+  version/config/schema change → replace published artifact
+```
+
+Only artifact publication, warm artifact consumption, lazy first-use
+preparation, and invalidation are meaningful parallels. The SQLok artifact
+lifecycle (`Unseen → Published → Warm → Invalid → Rebuilding`, if adopted) is
+our own design vocabulary, not a state machine inherited from MyFuses.
 
 The SQLok artifact is intentionally less powerful than executable generated
 source. It cannot execute arbitrary code. It only describes a previously
@@ -427,7 +449,7 @@ BenchmarkASTCompileCachedShape
 The warm path is explicit:
 
 ```go
-shape, err := compiler.Prepare(cache, stmt, compiler.DefaultShapeContext())
+shape, err := compiler.CompileShape(stmt)
 if err != nil {
     return err
 }
@@ -439,6 +461,11 @@ if err != nil {
 
 execute(shape.SQL(), args)
 ```
+
+For a registry-backed plan, the application stores this shape under an
+external `PlanID` after the first-use compile. A cache is useful when multiple
+components share those plans; it must not be created and discarded inside the
+same prepare call.
 
 `CompileCached` remains a convenience for callers that provide a statement on
 every call. It must derive the shape key each time to prevent collisions. Code
