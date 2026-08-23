@@ -8,6 +8,20 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestCompileSelectDistinct(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "name"),
+	).From(
+		sst.NewTableRef("users"),
+	).Distinct()
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT DISTINCT users.name FROM users", sql)
+	assert.Empty(t, args)
+}
+
 func TestCompileSelectWithColumnRef(t *testing.T) {
 	stmt := dql.Select(
 		sst.NewColumnRef("users", "id", sst.WithColumnSchema("public")),

@@ -77,6 +77,7 @@ func (e *fakeExpr) Accept(v sst.Visitor) error {
 
 type traversingVisitor struct {
 	visitedSelect            bool
+	visitedDistinct          bool
 	visitedColumnRefs        int
 	visitedTableRef          bool
 	visitedFrom              bool
@@ -98,9 +99,11 @@ type traversingVisitor struct {
 }
 
 func (v *traversingVisitor) VisitStatement(s sst.StatementNode) error {
-	switch s.(type) {
-	case sst.SelectStatementNode:
+	if _, ok := s.(sst.SelectStatementNode); ok {
 		v.visitedSelect = true
+	}
+	if s.Declaration() == "SELECT DISTINCT" {
+		v.visitedDistinct = true
 	}
 	return nil
 }
@@ -226,6 +229,19 @@ func TestSelectAcceptVisitsSelect(t *testing.T) {
 	if !visitor.visitedSelect {
 		t.Fatal("expected Select.Accept to call VisitSelect")
 	}
+}
+
+func TestSelectDistinctTraversal(t *testing.T) {
+	visitor := &traversingVisitor{}
+	stmt := Select(
+		sst.NewColumnRef("users", "name"),
+	).From(
+		sst.NewTableRef("users"),
+	).Distinct()
+
+	assert.NoError(t, stmt.Accept(visitor))
+	assert.True(t, visitor.visitedSelect)
+	assert.True(t, visitor.visitedDistinct)
 }
 
 func TestSelectTraversal(t *testing.T) {

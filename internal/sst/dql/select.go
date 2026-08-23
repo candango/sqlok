@@ -12,6 +12,7 @@ import (
 // sst.SelectStatementNode for traversal and compilation.
 type SelectStatement struct {
 	columns     *sst.CommaSeparatedList[sst.ExpressionNode]
+	distinct    bool
 	source      sst.FromSourceNode
 	tailSource  sst.FromSourceNode
 	pendingJoin *Join
@@ -91,6 +92,9 @@ func (s *SelectStatement) Accept(v sst.Visitor) error {
 
 // Declaration returns the SELECT statement keyword.
 func (s *SelectStatement) Declaration() string {
+	if s.distinct {
+		return "SELECT DISTINCT"
+	}
 	return "SELECT"
 }
 
@@ -98,6 +102,15 @@ func (s *SelectStatement) Declaration() string {
 // Once an error is recorded, subsequent builder operations are no-ops.
 func (s *SelectStatement) Err() error {
 	return s.err
+}
+
+// Distinct marks the SELECT statement to remove duplicate rows.
+func (s *SelectStatement) Distinct() sst.SelectBuilder {
+	if s.err != nil {
+		return s
+	}
+	s.distinct = true
+	return s
 }
 
 // Columns returns the projected expressions in this SELECT statement.

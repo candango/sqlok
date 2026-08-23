@@ -43,6 +43,9 @@ type SelectBuilder interface {
 	// Where adds or combines a WHERE condition.
 	Where(ExpressionNode) SelectBuilder
 
+	// Distinct marks the SELECT statement to remove duplicate rows.
+	Distinct() SelectBuilder
+
 	// OrderBy appends ORDER BY items to the SELECT statement.
 	OrderBy(...OrderItemNode) SelectBuilder
 
