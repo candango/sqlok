@@ -22,6 +22,18 @@ func TestCompileInsert(t *testing.T) {
 	assert.Equal(t, []any{"ana"}, args)
 }
 
+func TestCompileUpdate(t *testing.T) {
+	stmt := dml.Update(sst.NewTableRef("users")).
+		Set(sst.NewColumnRef("", "name"), sst.NewBindParam("ana")).
+		Where(sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(42)))
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "UPDATE users SET name = ? WHERE users.id = ?", sql)
+	assert.Equal(t, []any{"ana", 42}, args)
+}
+
 func TestCompileSelectDistinct(t *testing.T) {
 	stmt := dql.Select(
 		sst.NewColumnRef("users", "name"),
