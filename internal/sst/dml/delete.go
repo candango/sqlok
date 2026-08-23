@@ -27,11 +27,8 @@ func Delete(target sst.TableRefNode) *DeleteStatement {
 }
 
 // Accept dispatches the DELETE node and its children to the visitor.
+// Callers should check Err before traversal.
 func (d *DeleteStatement) Accept(v sst.Visitor) error {
-	if d.target == nil {
-		return errors.New("DELETE target table cannot be nil")
-	}
-
 	if err := v.VisitStatement(d); err != nil {
 		return err
 	}
@@ -52,9 +49,15 @@ func (d *DeleteStatement) Declaration() string {
 	return "DELETE FROM"
 }
 
-// Err returns the first construction error recorded by the statement.
+// Err returns the first construction or deferred structural validation error.
 func (d *DeleteStatement) Err() error {
-	return d.err
+	if d.err != nil {
+		return d.err
+	}
+	if d.target == nil {
+		return errors.New("DELETE target table cannot be nil")
+	}
+	return nil
 }
 
 // Target returns the table from which rows are deleted.

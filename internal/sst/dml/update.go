@@ -31,14 +31,8 @@ func Update(target sst.TableRefNode) *UpdateStatement {
 }
 
 // Accept dispatches the UPDATE node and its children to the visitor.
+// Callers should check Err before traversal.
 func (u *UpdateStatement) Accept(v sst.Visitor) error {
-	if u.target == nil {
-		return errors.New("UPDATE target table cannot be nil")
-	}
-	if len(u.assignments.Items()) == 0 {
-		return errors.New("UPDATE requires at least one SET assignment")
-	}
-
 	if err := v.VisitStatement(u); err != nil {
 		return err
 	}
@@ -70,9 +64,18 @@ func (u *UpdateStatement) Declaration() string {
 	return "UPDATE"
 }
 
-// Err returns the first construction error recorded by the statement.
+// Err returns the first construction or deferred structural validation error.
 func (u *UpdateStatement) Err() error {
-	return u.err
+	if u.err != nil {
+		return u.err
+	}
+	if u.target == nil {
+		return errors.New("UPDATE target table cannot be nil")
+	}
+	if len(u.assignments.Items()) == 0 {
+		return errors.New("UPDATE requires at least one SET assignment")
+	}
+	return nil
 }
 
 // Target returns the table being updated.

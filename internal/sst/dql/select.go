@@ -7,6 +7,9 @@ import (
 	"github.com/candango/sqlok/internal/sst"
 )
 
+// ErrOffsetRequiresLimit reports a structurally invalid offset-only SELECT.
+var ErrOffsetRequiresLimit = errors.New("OFFSET requires LIMIT")
+
 // SelectStatement is the concrete fluent builder and semantic root node of a
 // SELECT statement. It implements sst.SelectBuilder for construction and
 // sst.SelectStatementNode for traversal and compilation.
@@ -38,6 +41,7 @@ func Select(columns ...sst.ExpressionNode) *SelectStatement {
 }
 
 // Accept dispatches the SELECT node to the provided visitor.
+// Callers should check Err before traversal.
 func (s *SelectStatement) Accept(v sst.Visitor) error {
 	if err := v.VisitStatement(s); err != nil {
 		return err
@@ -116,14 +120,18 @@ func (s *SelectStatement) Declaration() string {
 	return "SELECT"
 }
 
-// Err returns the first construction error recorded by the statement.
-// Once an error is recorded, subsequent builder operations are no-ops.
+// Err returns the first recorded construction error or a deferred structural
+// validation error. Deferred validation errors are not stored, so a builder can
+// be repaired by a later operation such as Limit.
 func (s *SelectStatement) Err() error {
 	if s.err != nil {
 		return s.err
 	}
 	if s.columns == nil || len(s.columns.Items()) == 0 {
 		return errors.New("SELECT requires at least one expression")
+	}
+	if s.offset != nil && s.limit == nil {
+		return ErrOffsetRequiresLimit
 	}
 	return nil
 }

@@ -40,14 +40,8 @@ func Insert(target sst.TableRefNode, columns ...sst.ColumnRefNode) *InsertStatem
 }
 
 // Accept dispatches the INSERT node and its children to the visitor.
+// Callers should check Err before traversal.
 func (i *InsertStatement) Accept(v sst.Visitor) error {
-	if i.target == nil {
-		return errors.New("INSERT target table cannot be nil")
-	}
-	if i.values == nil || len(i.values.rows.Items()) == 0 {
-		return errors.New("INSERT requires at least one VALUES row")
-	}
-
 	if err := v.VisitStatement(i); err != nil {
 		return err
 	}
@@ -79,9 +73,18 @@ func (i *InsertStatement) Declaration() string {
 	return "INSERT INTO"
 }
 
-// Err returns the first construction error recorded by the statement.
+// Err returns the first construction or deferred structural validation error.
 func (i *InsertStatement) Err() error {
-	return i.err
+	if i.err != nil {
+		return i.err
+	}
+	if i.target == nil {
+		return errors.New("INSERT target table cannot be nil")
+	}
+	if i.values == nil || len(i.values.rows.Items()) == 0 {
+		return errors.New("INSERT requires at least one VALUES row")
+	}
+	return nil
 }
 
 // Target returns the table receiving inserted rows.

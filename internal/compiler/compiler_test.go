@@ -387,17 +387,48 @@ func TestCompileSelectRejectsNegativeLimit(t *testing.T) {
 	assert.EqualError(t, err, "LIMIT cannot be negative")
 }
 
-func TestCompileSelectWithOffset(t *testing.T) {
+func TestCompileSelectRejectsOffsetWithoutLimit(t *testing.T) {
 	stmt := dql.Select(
 		sst.NewColumnRef("users", "id"),
 	).From(
 		sst.NewTableRef("users"),
 	).Offset(10)
 
+	_, _, err := Compile(stmt)
+
+	assert.EqualError(t, err, "OFFSET requires LIMIT")
+	assert.ErrorIs(t, err, dql.ErrOffsetRequiresLimit)
+}
+
+func TestCompileSelectAllowsOffsetBeforeLimit(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Offset(10).
+		Limit(5)
+
 	sql, args, err := Compile(stmt)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "SELECT users.id FROM users OFFSET 10", sql)
+	assert.Equal(t, "SELECT users.id FROM users LIMIT 5 OFFSET 10", sql)
+	assert.Empty(t, args)
+}
+
+func TestCompileSelectWithLimitAndOffset(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).OrderBy(
+		sst.Asc(sst.NewColumnRef("users", "id")),
+	).Limit(10).
+		Offset(5)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users ORDER BY users.id ASC LIMIT 10 OFFSET 5", sql)
 	assert.Empty(t, args)
 }
 
@@ -406,13 +437,14 @@ func TestCompileSelectWithRepeatedOffsetUsesLastValue(t *testing.T) {
 		sst.NewColumnRef("users", "id"),
 	).From(
 		sst.NewTableRef("users"),
-	).Offset(10).
+	).Limit(100).
+		Offset(10).
 		Offset(20)
 
 	sql, args, err := Compile(stmt)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "SELECT users.id FROM users OFFSET 20", sql)
+	assert.Equal(t, "SELECT users.id FROM users LIMIT 100 OFFSET 20", sql)
 	assert.Empty(t, args)
 }
 
@@ -421,12 +453,13 @@ func TestCompileSelectWithZeroOffset(t *testing.T) {
 		sst.NewColumnRef("users", "id"),
 	).From(
 		sst.NewTableRef("users"),
-	).Offset(0)
+	).Limit(10).
+		Offset(0)
 
 	sql, args, err := Compile(stmt)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "SELECT users.id FROM users OFFSET 0", sql)
+	assert.Equal(t, "SELECT users.id FROM users LIMIT 10 OFFSET 0", sql)
 	assert.Empty(t, args)
 }
 

@@ -19,12 +19,13 @@ type ClauseNode interface {
 	DeclarationNode
 }
 
-// StatementNode represents a SQL statement root that can report a
-// construction error before compilation or execution.
+// StatementNode represents a SQL statement root that can validate itself
+// before compilation or traversal.
 type StatementNode interface {
 	DeclarationNode
 
-	// Err returns the first construction error recorded by the statement.
+	// Err returns a recorded construction error or a deferred structural
+	// validation error. Callers should check Err before calling Accept.
 	Err() error
 }
 
