@@ -39,6 +39,24 @@ func TestCompileSelectGroupBy(t *testing.T) {
 	assert.Empty(t, args)
 }
 
+func TestCompileSelectHaving(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).GroupBy(
+		sst.NewColumnRef("users", "id"),
+	).Having(
+		sst.Gt(sst.NewColumnRef("users", "id"), sst.NewBindParam(1)),
+	)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users GROUP BY users.id HAVING users.id > ?", sql)
+	assert.Equal(t, []any{1}, args)
+}
+
 func TestCompileSelectWithColumnRef(t *testing.T) {
 	stmt := dql.Select(
 		sst.NewColumnRef("users", "id", sst.WithColumnSchema("public")),

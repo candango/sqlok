@@ -79,6 +79,7 @@ type traversingVisitor struct {
 	visitedSelect            bool
 	visitedDistinct          bool
 	visitedGroupBy           bool
+	visitedHaving            bool
 	visitedColumnRefs        int
 	visitedTableRef          bool
 	visitedFrom              bool
@@ -120,6 +121,8 @@ func (v *traversingVisitor) VisitClause(s sst.ClauseNode) error {
 		v.visitedWhere = true
 	case "GROUP BY":
 		v.visitedGroupBy = true
+	case "HAVING":
+		v.visitedHaving = true
 	case "ORDER BY":
 		v.visitedOrderBy = true
 	case "LIMIT":
@@ -260,6 +263,24 @@ func TestSelectGroupByTraversal(t *testing.T) {
 
 	assert.NoError(t, stmt.Accept(visitor))
 	assert.True(t, visitor.visitedGroupBy)
+}
+
+func TestSelectHavingTraversal(t *testing.T) {
+	visitor := &traversingVisitor{}
+	stmt := Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).GroupBy(
+		sst.NewColumnRef("users", "id"),
+	).Having(
+		sst.Gt(sst.NewColumnRef("users", "id"), sst.NewBindParam(1)),
+	)
+
+	assert.NoError(t, stmt.Accept(visitor))
+	assert.True(t, visitor.visitedHaving)
+	assert.Equal(t, 1, visitor.visitedBinaryExpressions)
+	assert.Equal(t, []any{1}, visitor.bindParams)
 }
 
 func TestSelectTraversal(t *testing.T) {

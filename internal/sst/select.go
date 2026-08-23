@@ -49,6 +49,9 @@ type SelectBuilder interface {
 	// GroupBy adds expressions to the GROUP BY clause.
 	GroupBy(...ExpressionNode) SelectBuilder
 
+	// Having adds or combines a HAVING condition.
+	Having(ExpressionNode) SelectBuilder
+
 	// OrderBy appends ORDER BY items to the SELECT statement.
 	OrderBy(...OrderItemNode) SelectBuilder
 

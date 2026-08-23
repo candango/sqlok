@@ -18,6 +18,7 @@ type SelectStatement struct {
 	pendingJoin *Join
 	where       *whereClause
 	groupBy     *groupByClause
+	having      *havingClause
 	orderBy     *orderByClause
 	limit       *limitClause
 	offset      *offsetClause
@@ -69,6 +70,14 @@ func (s *SelectStatement) Accept(v sst.Visitor) error {
 			return err
 		}
 		if err := s.groupBy.Accept(v); err != nil {
+			return err
+		}
+	}
+	if s.having != nil {
+		if err := v.VisitClause(s.having); err != nil {
+			return err
+		}
+		if err := s.having.Accept(v); err != nil {
 			return err
 		}
 	}
@@ -272,6 +281,23 @@ func (s *SelectStatement) GroupBy(expressions ...sst.ExpressionNode) sst.SelectB
 	return s
 }
 
+// Having adds or combines a HAVING condition.
+func (s *SelectStatement) Having(condition sst.ExpressionNode) sst.SelectBuilder {
+	if s.err != nil {
+		return s
+	}
+	if condition == nil {
+		s.err = errors.New("HAVING condition cannot be nil")
+		return s
+	}
+	if s.having != nil {
+		condition = sst.And(s.having.condition, condition)
+	}
+
+	s.having = newHavingClause(condition)
+	return s
+}
+
 // OrderBy appends ORDER BY items to the SELECT statement.
 func (s *SelectStatement) OrderBy(items ...sst.OrderItemNode) sst.SelectBuilder {
 	if s.err != nil {
@@ -366,6 +392,24 @@ func (c *groupByClause) Declaration() string {
 
 func (c *groupByClause) Accept(v sst.Visitor) error {
 	return c.items.Accept(v)
+}
+
+type havingClause struct {
+	condition sst.ExpressionNode
+}
+
+var _ sst.ClauseNode = (*havingClause)(nil)
+
+func newHavingClause(condition sst.ExpressionNode) *havingClause {
+	return &havingClause{condition: condition}
+}
+
+func (h *havingClause) Declaration() string {
+	return "HAVING"
+}
+
+func (h *havingClause) Accept(v sst.Visitor) error {
+	return h.condition.Accept(v)
 }
 
 type orderByClause struct {
