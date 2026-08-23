@@ -9,6 +9,7 @@ const (
 	CrossJoin JoinType = "CROSS JOIN"
 	LeftJoin  JoinType = "LEFT JOIN"
 	RightJoin JoinType = "RIGHT JOIN"
+	FullJoin  JoinType = "FULL OUTER JOIN"
 )
 
 // FromSourceNode represents a SELECT FROM source and its optional join link.

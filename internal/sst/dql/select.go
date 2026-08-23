@@ -248,6 +248,18 @@ func (s *SelectStatement) Where(condition sst.ExpressionNode) sst.SelectBuilder 
 	return s
 }
 
+// FullJoin adds a source with the FULL OUTER JOIN type.
+func (s *SelectStatement) FullJoin(table sst.TableRefNode) sst.SelectBuilder {
+	if s.err != nil {
+		return s
+	}
+	if err := s.addJoin(table, sst.FullJoin); err != nil {
+		s.err = err
+		return s
+	}
+	return s
+}
+
 // On completes the most recently created JOIN with its condition.
 func (s *SelectStatement) On(condition sst.Node) sst.SelectBuilder {
 	if s.err != nil {

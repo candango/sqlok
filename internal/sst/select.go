@@ -37,6 +37,9 @@ type SelectBuilder interface {
 	// RightJoin adds a source with the RIGHT JOIN type.
 	RightJoin(TableRefNode) SelectBuilder
 
+	// FullJoin adds a source with the FULL OUTER JOIN type.
+	FullJoin(TableRefNode) SelectBuilder
+
 	// On completes the most recently created JOIN.
 	On(Node) SelectBuilder
 

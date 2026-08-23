@@ -93,6 +93,7 @@ type traversingVisitor struct {
 	offsetValues             []int
 	visitedJoin              bool
 	joinEvents               []string
+	joinTypes                []sst.JoinType
 	visitedBinaryExpressions int
 	visitedLogicalOperators  int
 	visitedNotExpressions    int
@@ -186,6 +187,7 @@ func (v *traversingVisitor) VisitTableRef(s sst.TableRefNode) error {
 
 func (v *traversingVisitor) VisitJoin(j sst.JoinNode) error {
 	v.visitedJoin = true
+	v.joinTypes = append(v.joinTypes, j.Type())
 	v.joinEvents = append(v.joinEvents, "join")
 
 	right := j.Right()
@@ -424,6 +426,26 @@ func TestSelectOffsetTraversal(t *testing.T) {
 	assert.NoError(t, stmt.Accept(visitor))
 	assert.True(t, visitor.visitedOffset)
 	assert.Equal(t, []int{10}, visitor.offsetValues)
+}
+
+func TestSelectFullJoinTraversal(t *testing.T) {
+	visitor := &traversingVisitor{}
+	stmt := Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).FullJoin(
+		sst.NewTableRef("orders"),
+	).On(
+		sst.Eq(
+			sst.NewColumnRef("users", "id"),
+			sst.NewColumnRef("orders", "user_id"),
+		),
+	)
+
+	assert.NoError(t, stmt.Accept(visitor))
+	assert.True(t, visitor.visitedJoin)
+	assert.Equal(t, []sst.JoinType{sst.FullJoin}, visitor.joinTypes)
 }
 
 func TestSelectJoinTraversalChain(t *testing.T) {

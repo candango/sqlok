@@ -395,6 +395,27 @@ func TestCompileSelectRejectsNegativeOffset(t *testing.T) {
 	assert.EqualError(t, err, "OFFSET cannot be negative")
 }
 
+func TestCompileSelectWithFullOuterJoin(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).FullJoin(
+		sst.NewTableRef("orders"),
+	).On(
+		sst.Eq(
+			sst.NewColumnRef("users", "id"),
+			sst.NewColumnRef("orders", "user_id"),
+		),
+	)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users FULL OUTER JOIN orders ON users.id = orders.user_id", sql)
+	assert.Empty(t, args)
+}
+
 func TestCompileSelectWithFromAndJoin(t *testing.T) {
 
 	t.Run("should have from and join", func(t *testing.T) {
