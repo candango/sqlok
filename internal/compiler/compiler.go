@@ -134,6 +134,19 @@ func (c *Compiler) VisitJoin(j sst.JoinNode) error {
 
 // VisitColumnRef renders a qualified or unqualified SQL column reference.
 func (c *Compiler) VisitColumnRef(column sst.ColumnRefNode) error {
+	if column.Schema() != "" {
+		if err := validateIdentifier("schema", column.Schema()); err != nil {
+			return err
+		}
+	}
+	if column.Table() != "" {
+		if err := validateIdentifier("table", column.Table()); err != nil {
+			return err
+		}
+	}
+	if err := validateIdentifier("column", column.Name()); err != nil {
+		return err
+	}
 	if c.collectOnly {
 		return nil
 	}
@@ -159,6 +172,14 @@ func (c *Compiler) VisitListSeparator(index int, sep string) error {
 
 // VisitTableRef renders a qualified or unqualified SQL table reference.
 func (c *Compiler) VisitTableRef(table sst.TableRefNode) error {
+	if table.Schema() != "" {
+		if err := validateIdentifier("schema", table.Schema()); err != nil {
+			return err
+		}
+	}
+	if err := validateIdentifier("table", table.Name()); err != nil {
+		return err
+	}
 	if c.collectOnly {
 		return nil
 	}
