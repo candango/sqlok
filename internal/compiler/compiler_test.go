@@ -34,6 +34,17 @@ func TestCompileUpdate(t *testing.T) {
 	assert.Equal(t, []any{"ana", 42}, args)
 }
 
+func TestCompileDelete(t *testing.T) {
+	stmt := dml.Delete(sst.NewTableRef("users")).
+		Where(sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(42)))
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "DELETE FROM users WHERE users.id = ?", sql)
+	assert.Equal(t, []any{42}, args)
+}
+
 func TestCompileSelectDistinct(t *testing.T) {
 	stmt := dql.Select(
 		sst.NewColumnRef("users", "name"),
