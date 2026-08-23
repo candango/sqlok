@@ -4,6 +4,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/candango/sqlok/internal/dialect"
 	"github.com/candango/sqlok/internal/sst"
 	"github.com/candango/sqlok/internal/sst/dql"
 	"github.com/stretchr/testify/assert"
@@ -35,6 +36,34 @@ func TestCompileCachedReusesShapeAndBindsSuppliedArgs(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, firstShape.SQL(), secondShape.SQL())
 	assert.Equal(t, []any{7}, secondArgs)
+	assert.Equal(t, 1, cache.Len())
+}
+
+func TestCompileCachedReusesShapeForDifferentPaginationValues(t *testing.T) {
+	cache := NewStatementCache()
+	first := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Limit(10).
+		Offset(20)
+	second := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Limit(30).
+		Offset(40)
+
+	firstShape, firstArgs, err := CompileCached(cache, first, []any{10, 20})
+	assert.NoError(t, err)
+	secondShape, secondArgs, err := CompileCached(cache, second, []any{30, 40})
+	assert.NoError(t, err)
+
+	assert.Equal(t, "SELECT users.id FROM users LIMIT ? OFFSET ?", firstShape.SQL())
+	assert.Equal(t, firstShape.SQL(), secondShape.SQL())
+	assert.Equal(t, []any{10, 20}, firstArgs)
+	assert.Equal(t, []any{30, 40}, secondArgs)
+	assert.Equal(t, firstShape.ShapeKey(), secondShape.ShapeKey())
 	assert.Equal(t, 1, cache.Len())
 }
 
@@ -143,8 +172,12 @@ func TestCompileCachedRejectsInvalidCacheInputs(t *testing.T) {
 func TestCompileCachedIncludesShapeContext(t *testing.T) {
 	stmt := dql.Select(sst.NewColumnRef("users", "id"))
 	cache := NewStatementCache()
-	postgres := ShapeContext{Dialect: "postgres", CompilerVersion: "compiler-v1"}
-	sqlite := ShapeContext{Dialect: "sqlite", CompilerVersion: "compiler-v1"}
+	postgresDialect, err := dialect.NewDialect(dialect.DialectPostgres)
+	assert.NoError(t, err)
+	sqliteDialect, err := dialect.NewDialect(dialect.DialectSQLite)
+	assert.NoError(t, err)
+	postgres := ShapeContext{Dialect: postgresDialect, CompilerVersion: "compiler-v1"}
+	sqlite := ShapeContext{Dialect: sqliteDialect, CompilerVersion: "compiler-v1"}
 
 	postgresShape, _, err := CompileCachedWithContext(cache, stmt, nil, postgres)
 	assert.NoError(t, err)
@@ -154,6 +187,30 @@ func TestCompileCachedIncludesShapeContext(t *testing.T) {
 	assert.NotEqual(t, postgresShape.ShapeKey(), sqliteShape.ShapeKey())
 	assert.Equal(t, "postgres", postgresShape.Dialect())
 	assert.Equal(t, "sqlite", sqliteShape.Dialect())
+	assert.Equal(t, 2, cache.Len())
+}
+
+func TestCompileCachedDistinguishesQuestionMarkDialectIdentities(t *testing.T) {
+	stmt := dql.Select(sst.NewColumnRef("users", "id"))
+	cache := NewStatementCache()
+	mysqlDialect, err := dialect.NewDialect(dialect.DialectMySQL)
+	assert.NoError(t, err)
+	sqliteDialect, err := dialect.NewDialect(dialect.DialectSQLite)
+	assert.NoError(t, err)
+
+	mysqlShape, _, err := CompileCachedWithContext(cache, stmt, nil, ShapeContext{
+		Dialect:         mysqlDialect,
+		CompilerVersion: "compiler-v1",
+	})
+	assert.NoError(t, err)
+	sqliteShape, _, err := CompileCachedWithContext(cache, stmt, nil, ShapeContext{
+		Dialect:         sqliteDialect,
+		CompilerVersion: "compiler-v1",
+	})
+	assert.NoError(t, err)
+
+	assert.Equal(t, mysqlShape.SQL(), sqliteShape.SQL())
+	assert.NotEqual(t, mysqlShape.ShapeKey(), sqliteShape.ShapeKey())
 	assert.Equal(t, 2, cache.Len())
 }
 

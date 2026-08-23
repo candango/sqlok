@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/candango/sqlok/internal/dialect"
 	"github.com/candango/sqlok/internal/sst"
 )
 
@@ -28,20 +29,23 @@ type ShapeKey string
 
 // ShapeContext identifies the rendering inputs that affect a statement shape.
 type ShapeContext struct {
-	Dialect         string
+	Dialect         dialect.Dialect
 	CompilerVersion string
 }
+
+var defaultDialect = dialect.NewDefaultDialect()
 
 // DefaultShapeContext returns the current default compiler identity.
 func DefaultShapeContext() ShapeContext {
 	return ShapeContext{
-		Dialect:         "default",
+		Dialect:         defaultDialect,
 		CompilerVersion: defaultCompilerVersion,
 	}
 }
 
 func (c ShapeContext) validate() error {
-	if strings.TrimSpace(c.Dialect) == "" ||
+	if c.Dialect == nil ||
+		strings.TrimSpace(string(c.Dialect.Name())) == "" ||
 		strings.TrimSpace(c.CompilerVersion) == "" {
 		return ErrInvalidShapeContext
 	}
@@ -311,7 +315,7 @@ func newCompiledStatementWithContext(
 		sql:             sqlText,
 		bindLayout:      bindLayout,
 		shapeKey:        key,
-		dialect:         context.Dialect,
+		dialect:         string(context.Dialect.Name()),
 		compilerVersion: context.CompilerVersion,
 	}
 }

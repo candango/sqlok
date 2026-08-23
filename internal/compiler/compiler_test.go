@@ -3,6 +3,7 @@ package compiler
 import (
 	"testing"
 
+	"github.com/candango/sqlok/internal/dialect"
 	"github.com/candango/sqlok/internal/sst"
 	"github.com/candango/sqlok/internal/sst/dml"
 	"github.com/candango/sqlok/internal/sst/dql"
@@ -20,6 +21,29 @@ func TestCompileInsert(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "INSERT INTO public.users (name) VALUES (?)", sql)
 	assert.Equal(t, []any{"ana"}, args)
+}
+
+func TestCompileWithContextUsesUnifiedPostgresBindPositions(t *testing.T) {
+	postgresDialect, err := dialect.NewDialect(dialect.DialectPostgres)
+	assert.NoError(t, err)
+
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Where(
+		sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(42)),
+	).Limit(10).
+		Offset(20)
+
+	sql, args, err := CompileWithContext(stmt, ShapeContext{
+		Dialect:         postgresDialect,
+		CompilerVersion: "compiler-v1",
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users WHERE users.id = $1 LIMIT $2 OFFSET $3", sql)
+	assert.Equal(t, []any{42, 10, 20}, args)
 }
 
 func TestCompileUpdate(t *testing.T) {
@@ -344,8 +368,8 @@ func TestCompileSelectWithLimit(t *testing.T) {
 	sql, args, err := Compile(stmt)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "SELECT users.id FROM users LIMIT 10", sql)
-	assert.Empty(t, args)
+	assert.Equal(t, "SELECT users.id FROM users LIMIT ?", sql)
+	assert.Equal(t, []any{10}, args)
 }
 
 func TestCompileSelectWithRepeatedLimitUsesLastValue(t *testing.T) {
@@ -359,8 +383,8 @@ func TestCompileSelectWithRepeatedLimitUsesLastValue(t *testing.T) {
 	sql, args, err := Compile(stmt)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "SELECT users.id FROM users LIMIT 20", sql)
-	assert.Empty(t, args)
+	assert.Equal(t, "SELECT users.id FROM users LIMIT ?", sql)
+	assert.Equal(t, []any{20}, args)
 }
 
 func TestCompileSelectWithZeroLimit(t *testing.T) {
@@ -373,8 +397,8 @@ func TestCompileSelectWithZeroLimit(t *testing.T) {
 	sql, args, err := Compile(stmt)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "SELECT users.id FROM users LIMIT 0", sql)
-	assert.Empty(t, args)
+	assert.Equal(t, "SELECT users.id FROM users LIMIT ?", sql)
+	assert.Equal(t, []any{0}, args)
 }
 
 func TestCompileSelectRejectsNegativeLimit(t *testing.T) {
@@ -411,8 +435,8 @@ func TestCompileSelectAllowsOffsetBeforeLimit(t *testing.T) {
 	sql, args, err := Compile(stmt)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "SELECT users.id FROM users LIMIT 5 OFFSET 10", sql)
-	assert.Empty(t, args)
+	assert.Equal(t, "SELECT users.id FROM users LIMIT ? OFFSET ?", sql)
+	assert.Equal(t, []any{5, 10}, args)
 }
 
 func TestCompileSelectWithLimitAndOffset(t *testing.T) {
@@ -428,8 +452,8 @@ func TestCompileSelectWithLimitAndOffset(t *testing.T) {
 	sql, args, err := Compile(stmt)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "SELECT users.id FROM users ORDER BY users.id ASC LIMIT 10 OFFSET 5", sql)
-	assert.Empty(t, args)
+	assert.Equal(t, "SELECT users.id FROM users ORDER BY users.id ASC LIMIT ? OFFSET ?", sql)
+	assert.Equal(t, []any{10, 5}, args)
 }
 
 func TestCompileSelectWithRepeatedOffsetUsesLastValue(t *testing.T) {
@@ -444,8 +468,8 @@ func TestCompileSelectWithRepeatedOffsetUsesLastValue(t *testing.T) {
 	sql, args, err := Compile(stmt)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "SELECT users.id FROM users LIMIT 100 OFFSET 20", sql)
-	assert.Empty(t, args)
+	assert.Equal(t, "SELECT users.id FROM users LIMIT ? OFFSET ?", sql)
+	assert.Equal(t, []any{100, 20}, args)
 }
 
 func TestCompileSelectWithZeroOffset(t *testing.T) {
@@ -459,8 +483,8 @@ func TestCompileSelectWithZeroOffset(t *testing.T) {
 	sql, args, err := Compile(stmt)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "SELECT users.id FROM users LIMIT 10 OFFSET 0", sql)
-	assert.Empty(t, args)
+	assert.Equal(t, "SELECT users.id FROM users LIMIT ? OFFSET ?", sql)
+	assert.Equal(t, []any{10, 0}, args)
 }
 
 func TestCompileSelectRejectsNegativeOffset(t *testing.T) {

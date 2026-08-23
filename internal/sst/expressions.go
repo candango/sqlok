@@ -47,11 +47,12 @@ type LogicalExpressionNode interface {
 	Operator() BooleanOperator
 }
 
-// BindParamNode represents an expression backed by a runtime argument.
+// BindParamNode represents a node backed by a runtime argument. Placeholder
+// rendering belongs to the compiler and dialect, not to this contract.
 type BindParamNode interface {
-	ExpressionNode
+	Node
 
-	// Value returns the runtime argument associated with the expression.
+	// Value returns the runtime argument associated with the node.
 	Value() any
 }
 
@@ -302,7 +303,8 @@ func (p *BindParam) Accept(v Visitor) error {
 	return v.VisitExpression(p)
 }
 
-// Expr returns the placeholder representation of the bind parameter.
+// Expr returns the legacy placeholder representation required by the
+// ExpressionNode contract. Dialect-aware compiler paths do not use this value.
 func (p *BindParam) Expr() string {
 	return "?"
 }

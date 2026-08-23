@@ -25,7 +25,7 @@ func DeriveShapeKey(stmt sst.StatementNode, context ShapeContext) (ShapeKey, err
 	}
 
 	fingerprint := &shapeFingerprint{}
-	fingerprint.token("dialect", context.Dialect)
+	fingerprint.token("dialect", string(context.Dialect.Name()))
 	fingerprint.token("compiler", context.CompilerVersion)
 	if err := stmt.Accept(fingerprint); err != nil {
 		return "", err
@@ -141,12 +141,12 @@ func (f *shapeFingerprint) VisitOrderItem(item sst.OrderItemNode) error {
 	return nil
 }
 
-func (f *shapeFingerprint) VisitLimit(limit sst.LimitNode) error {
-	f.token("limit", strconv.Itoa(limit.Value()))
+func (f *shapeFingerprint) VisitLimit(sst.LimitNode) error {
+	f.token("limit-bind")
 	return nil
 }
 
-func (f *shapeFingerprint) VisitOffset(offset sst.OffsetNode) error {
-	f.token("offset", strconv.Itoa(offset.Value()))
+func (f *shapeFingerprint) VisitOffset(sst.OffsetNode) error {
+	f.token("offset-bind")
 	return nil
 }

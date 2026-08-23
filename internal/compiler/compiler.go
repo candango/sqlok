@@ -1,19 +1,31 @@
 package compiler
 
 import (
-	"strconv"
 	"strings"
 
+	"github.com/candango/sqlok/internal/dialect"
 	"github.com/candango/sqlok/internal/sst"
 )
 
-// Compile compiles a statement node into SQL text and bound arguments.
+// Compile compiles a statement node into SQL text and bound arguments using
+// the default dialect.
 func Compile(stmt sst.StatementNode) (string, []any, error) {
+	return CompileWithContext(stmt, DefaultShapeContext())
+}
+
+// CompileWithContext compiles a statement using the supplied dialect context.
+func CompileWithContext(
+	stmt sst.StatementNode,
+	context ShapeContext,
+) (string, []any, error) {
+	if err := context.validate(); err != nil {
+		return "", nil, err
+	}
 	if err := stmt.Err(); err != nil {
 		return "", nil, err
 	}
 
-	c := &Compiler{}
+	c := &Compiler{dialect: context.Dialect}
 	if err := stmt.Accept(c); err != nil {
 		return "", nil, err
 	}
@@ -22,8 +34,10 @@ func Compile(stmt sst.StatementNode) (string, []any, error) {
 
 // Compiler walks SQL semantic tree nodes and renders SQL.
 type Compiler struct {
-	parts []string
-	args  []any
+	parts        []string
+	args         []any
+	dialect      dialect.Dialect
+	bindPosition int
 }
 
 var _ sst.Visitor = (*Compiler)(nil)
@@ -44,7 +58,7 @@ func (c *Compiler) VisitClause(clause sst.ClauseNode) error {
 // expressions have already traversed their operands before this call.
 func (c *Compiler) VisitExpression(expr sst.ExpressionNode) error {
 	if param, ok := expr.(sst.BindParamNode); ok {
-		c.args = append(c.args, param.Value())
+		return c.bind(param.Value())
 	}
 	c.parts = append(c.parts, expr.Expr())
 	return nil
@@ -174,14 +188,19 @@ func (c *Compiler) VisitOrderItem(item sst.OrderItemNode) error {
 	return nil
 }
 
-// VisitLimit renders the SELECT row limit value.
+// VisitLimit renders the SELECT row limit as a runtime bind slot.
 func (c *Compiler) VisitLimit(limit sst.LimitNode) error {
-	c.parts = append(c.parts, strconv.Itoa(limit.Value()))
-	return nil
+	return c.bind(limit.Value())
 }
 
-// VisitOffset renders the SELECT row offset value.
+// VisitOffset renders the SELECT row offset as a runtime bind slot.
 func (c *Compiler) VisitOffset(offset sst.OffsetNode) error {
-	c.parts = append(c.parts, strconv.Itoa(offset.Value()))
+	return c.bind(offset.Value())
+}
+
+func (c *Compiler) bind(value any) error {
+	c.parts = append(c.parts, c.dialect.Placeholder(c.bindPosition))
+	c.args = append(c.args, value)
+	c.bindPosition++
 	return nil
 }
