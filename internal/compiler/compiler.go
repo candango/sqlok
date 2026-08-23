@@ -66,6 +66,12 @@ func (c *Compiler) VisitExpressionGroupEnd() error {
 	return nil
 }
 
+// VisitSpace renders one SQL whitespace boundary.
+func (c *Compiler) VisitSpace() error {
+	c.parts = append(c.parts, " ")
+	return nil
+}
+
 // VisitFromSource renders the base SELECT source reference. Forward JOIN
 // traversal will continue from the source's attached join through Right.
 func (c *Compiler) VisitFromSource(source sst.FromSourceNode) error {

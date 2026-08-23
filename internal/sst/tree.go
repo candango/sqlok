@@ -70,6 +70,9 @@ type Visitor interface {
 	// VisitExpressionGroupEnd renders the end of a grouped expression.
 	VisitExpressionGroupEnd() error
 
+	// VisitSpace renders one SQL whitespace boundary.
+	VisitSpace() error
+
 	// VisitFromSource visits a SELECT source and its attached joins.
 	VisitFromSource(FromSourceNode) error
 

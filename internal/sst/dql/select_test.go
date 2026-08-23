@@ -41,6 +41,10 @@ func (v *fakeVisitor) VisitExpressionGroupEnd() error {
 	return nil
 }
 
+func (v *fakeVisitor) VisitSpace() error {
+	return nil
+}
+
 func (v *fakeVisitor) VisitFromSource(s sst.FromSourceNode) error {
 	return nil
 }
@@ -159,6 +163,10 @@ func (v *traversingVisitor) VisitExpressionGroupStart() error {
 }
 
 func (v *traversingVisitor) VisitExpressionGroupEnd() error {
+	return nil
+}
+
+func (v *traversingVisitor) VisitSpace() error {
 	return nil
 }
 
