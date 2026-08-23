@@ -485,3 +485,91 @@ column-to-column comparison such as `users.id = orders.user_id` needs an
 expression form that represents both operands as column nodes. `sqlok` should
 keep column references, bound values, inline literals, and raw expressions
 distinct in its condition AST.
+
+## Compiled SQL caching and bound LIMIT/OFFSET values
+
+SQLAlchemy provides an application-side compiled SQL cache at the `Engine`
+level. The cache stores the SQL string and compilation metadata, not query
+results or current parameter values. Its default `query_cache_size` is 500;
+setting it to zero disables the built-in cache, and callers may provide a
+custom `compiled_cache` mapping through execution options. The built-in cache
+uses an LRU-style pruning policy rather than retaining entries forever.
+
+Sources:
+
+- https://docs.sqlalchemy.org/en/20/core/engines.html
+- https://docs.sqlalchemy.org/en/21/core/connections.html#sql-caching
+
+### Row-limiting values must remain bindable
+
+SQLAlchemy's compilation-caching documentation identifies literal
+`LIMIT`/`OFFSET` values as incompatible with reusable compiled SQL: if those
+values are rendered into the template, different pages require different SQL
+strings. Its solution is to bind them when the dialect supports that form, or
+use a post-compile rendering path for dialects that do not.
+
+The current SQLok target set supports the bindable form:
+
+- PostgreSQL accepts positional parameters in prepared statements, and its
+  `LIMIT`/`OFFSET` clauses consume count/start values.
+- MySQL explicitly documents placeholders in prepared-statement `LIMIT`
+  clauses, including offset and row-count parameters.
+- SQLite permits scalar expressions in `LIMIT` and `OFFSET`, and bind
+  parameters are expressions evaluated at runtime.
+
+Sources:
+
+- https://www.postgresql.org/docs/current/sql-prepare.html
+- https://www.postgresql.org/docs/current/queries-limit.html
+- https://dev.mysql.com/doc/refman/8.4/en/select.html
+- https://www.sqlite.org/lang_select.html
+- https://www.sqlite.org/lang_expr.html#parameters
+
+### SQLok consequence
+
+`LIMIT` and `OFFSET` values should be entries in the same bind layout as
+condition values. The compiler must use one bind-position allocator for the
+whole traversal, so a statement such as:
+
+```text
+WHERE users.id = $1 LIMIT $2 OFFSET $3
+```
+
+gets one deterministic binding order. The shape identity records the presence
+and structural order of `WHERE`, `LIMIT`, and `OFFSET`, but excludes their
+runtime values. Thus different pages reuse one compiled SQL artifact, while
+`LIMIT` without `OFFSET` and `LIMIT` with `OFFSET` remain different shapes.
+
+The validation that `OFFSET` requires `LIMIT` is structural and remains in
+force regardless of whether the values are literals or bind parameters. The
+portable baseline remains `LIMIT n OFFSET m` for PostgreSQL, MySQL, and SQLite;
+Oracle and SQL Server are outside the current scope. A post-compile row-limit
+fallback may be added for future dialects that cannot bind these positions.
+
+## OFFSET validation review and resolution
+
+The portable `OFFSET` policy was implemented and verified with `gofmt`,
+`go vet ./...`, `go test ./...`, and the compiler race tests. The compiler
+renders `LIMIT` before `OFFSET`, after `ORDER BY`, and rejects `OFFSET` without
+`LIMIT`.
+
+The validation review produced four resolutions:
+
+1. `SelectStatement.Err()` has two documented behaviors: it returns a recorded
+   construction error, or computes a validation error for an invalid root or
+   an `OFFSET` without `LIMIT`. Computed errors are deliberately not stored in
+   `s.err`, so a builder can be repaired later with `.Limit(...)`.
+2. A regression covers `.Offset(10).Limit(5)`. Deferred validation makes this
+   valid and documents that builder call order does not make a temporarily
+   incomplete pagination clause permanently invalid.
+3. `ErrOffsetRequiresLimit` is a package-level sentinel, so repeated
+   validation reuses the same error and callers can use `errors.Is`.
+4. Validation follows one convention across statement roots: `Err()` owns
+   recorded and deferred structural validation, while `Accept()` assumes the
+   caller has checked `Err()` and only performs visitor traversal. `Compile`
+   and shape derivation enforce this boundary before accepting a statement.
+
+The current rejection is intentionally a builder-level portable policy, not a
+permanent PostgreSQL restriction. PostgreSQL may later relax `OFFSET` without
+`LIMIT` through dialect configuration; the current API shape permits that
+change without changing the fluent construction methods.
