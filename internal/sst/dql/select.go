@@ -16,7 +16,7 @@ type SelectStatement struct {
 	source      sst.FromSourceNode
 	tailSource  sst.FromSourceNode
 	pendingJoin *Join
-	where       *whereClause
+	where       sst.WhereCriteriaNode
 	groupBy     *groupByClause
 	having      *havingClause
 	orderBy     *orderByClause
@@ -241,10 +241,10 @@ func (s *SelectStatement) Where(condition sst.ExpressionNode) sst.SelectBuilder 
 		return s
 	}
 	if s.where != nil {
-		condition = sst.And(s.where.condition, condition)
+		condition = sst.And(s.where.Condition(), condition)
 	}
 
-	s.where = newWhereClause(condition)
+	s.where = sst.NewWhereCriteria(condition)
 	return s
 }
 
@@ -368,24 +368,6 @@ func (s *SelectStatement) Offset(value int) sst.SelectBuilder {
 // Source returns the primary FROM source.
 func (s *SelectStatement) Source() sst.FromSourceNode {
 	return s.source
-}
-
-type whereClause struct {
-	condition sst.ExpressionNode
-}
-
-var _ sst.ClauseNode = (*whereClause)(nil)
-
-func newWhereClause(condition sst.ExpressionNode) *whereClause {
-	return &whereClause{condition: condition}
-}
-
-func (w *whereClause) Declaration() string {
-	return "WHERE"
-}
-
-func (w *whereClause) Accept(v sst.Visitor) error {
-	return w.condition.Accept(v)
 }
 
 type groupByClause struct {
