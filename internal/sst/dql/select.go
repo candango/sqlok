@@ -119,7 +119,13 @@ func (s *SelectStatement) Declaration() string {
 // Err returns the first construction error recorded by the statement.
 // Once an error is recorded, subsequent builder operations are no-ops.
 func (s *SelectStatement) Err() error {
-	return s.err
+	if s.err != nil {
+		return s.err
+	}
+	if s.columns == nil || len(s.columns.Items()) == 0 {
+		return errors.New("SELECT requires at least one expression")
+	}
+	return nil
 }
 
 // Distinct marks the SELECT statement to remove duplicate rows.

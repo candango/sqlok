@@ -45,6 +45,14 @@ func TestCompileDelete(t *testing.T) {
 	assert.Equal(t, []any{42}, args)
 }
 
+func TestCompileSelectRejectsEmptyProjection(t *testing.T) {
+	stmt := dql.Select().From(sst.NewTableRef("users"))
+
+	_, _, err := Compile(stmt)
+
+	assert.EqualError(t, err, "SELECT requires at least one expression")
+}
+
 func TestCompileSelectDistinct(t *testing.T) {
 	stmt := dql.Select(
 		sst.NewColumnRef("users", "name"),
