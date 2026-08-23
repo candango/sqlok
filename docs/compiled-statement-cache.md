@@ -416,17 +416,34 @@ BenchmarkCompileCachedMiss
   compile and publish a shape on every cache miss;
 
 BenchmarkCompileCachedHit
-  build equivalent current statements, reuse the cached SQL shape, and collect
-  current values without re-rendering SQL;
+  derive equivalent current statements, reuse the cached SQL shape, and bind
+  supplied values without re-rendering SQL. This still measures shape
+  derivation on each call;
 
 BenchmarkASTCompileCachedShape
-  reuse only the SQL template and a hand-written binder as an upper-bound POC.
+  prepare one shape and reuse its real `CompiledStatement.Bind` path.
 ```
 
-The cached-shape benchmark is deliberately a small upper-bound POC. Its bind
-layout is explicit in the benchmark instead of being derived automatically
-from the SST. It demonstrates the potential value of avoiding repeated SQL
-rendering, but it is not the production cache contract.
+The warm path is explicit:
+
+```go
+shape, err := compiler.Prepare(cache, stmt, compiler.DefaultShapeContext())
+if err != nil {
+    return err
+}
+
+args, err := shape.Bind(currentArgs)
+if err != nil {
+    return err
+}
+
+execute(shape.SQL(), args)
+```
+
+`CompileCached` remains a convenience for callers that provide a statement on
+every call. It must derive the shape key each time to prevent collisions. Code
+that already owns a stable statement plan should retain the prepared
+`CompiledStatement` and use `Bind` directly; that is the actual warm path.
 
 The benchmark must preserve dynamic values. The warm path may reuse the SQL
 template, but it must create or populate current arguments for each iteration;

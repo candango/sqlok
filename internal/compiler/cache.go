@@ -210,53 +210,61 @@ func CompileShapeWithContext(
 	return shape, err
 }
 
-// CompileCached returns a cached SQL shape and the current bound values using
-// the default shape context. The shape key is derived from the statement.
-func CompileCached(
-	cache *StatementCache,
-	stmt sst.StatementNode,
-) (CompiledStatement, []any, error) {
-	return CompileCachedWithContext(cache, stmt, DefaultShapeContext())
-}
-
-// CompileCachedWithContext returns a cached SQL shape and current bound values.
-// The shape key is derived from canonical statement structure and context.
-func CompileCachedWithContext(
+// Prepare derives or retrieves an immutable compiled statement shape.
+// Callers can reuse the returned shape and call Bind for the warm path.
+func Prepare(
 	cache *StatementCache,
 	stmt sst.StatementNode,
 	context ShapeContext,
-) (CompiledStatement, []any, error) {
+) (CompiledStatement, error) {
 	if cache == nil {
-		return CompiledStatement{}, nil, ErrNilStatementCache
+		return CompiledStatement{}, ErrNilStatementCache
 	}
 	if err := context.validate(); err != nil {
-		return CompiledStatement{}, nil, err
+		return CompiledStatement{}, err
 	}
 	key, err := DeriveShapeKey(stmt, context)
 	if err != nil {
-		return CompiledStatement{}, nil, err
+		return CompiledStatement{}, err
 	}
-
 	if shape, ok := cache.Get(key); ok {
-		args, err := CollectArgs(stmt)
-		if err != nil {
-			return CompiledStatement{}, nil, err
-		}
-		args, err = shape.Bind(args)
-		if err != nil {
-			return CompiledStatement{}, nil, err
-		}
-		return shape, args, nil
+		return shape, nil
 	}
 
-	shape, args, err := compileStatement(stmt, context, key)
+	shape, _, err := compileStatement(stmt, context, key)
+	if err != nil {
+		return CompiledStatement{}, err
+	}
+	if err := cache.Put(key, shape); err != nil {
+		return CompiledStatement{}, err
+	}
+	return shape, nil
+}
+
+// CompileCached returns a cached SQL shape and the supplied runtime values
+// using the default shape context. The shape key is derived from the statement.
+func CompileCached(
+	cache *StatementCache,
+	stmt sst.StatementNode,
+	args []any,
+) (CompiledStatement, []any, error) {
+	return CompileCachedWithContext(cache, stmt, args, DefaultShapeContext())
+}
+
+// CompileCachedWithContext returns a cached SQL shape and supplied runtime
+// values. The shape key is derived from canonical statement structure/context.
+func CompileCachedWithContext(
+	cache *StatementCache,
+	stmt sst.StatementNode,
+	args []any,
+	context ShapeContext,
+) (CompiledStatement, []any, error) {
+	shape, err := Prepare(cache, stmt, context)
 	if err != nil {
 		return CompiledStatement{}, nil, err
 	}
-	if _, err := shape.Bind(args); err != nil {
-		return CompiledStatement{}, nil, err
-	}
-	if err := cache.Put(key, shape); err != nil {
+	args, err = shape.Bind(args)
+	if err != nil {
 		return CompiledStatement{}, nil, err
 	}
 	return shape, args, nil

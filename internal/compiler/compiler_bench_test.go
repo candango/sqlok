@@ -113,14 +113,22 @@ func BenchmarkCompileCachedMiss(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		cache.Clear()
-		shape, args, err := CompileCached(cache, benchmarkASTStatement())
+		shape, args, err := CompileCached(
+			cache,
+			benchmarkASTStatement(),
+			[]any{benchmarkID, "second"},
+		)
 		benchmarkSQL, benchmarkArgs, benchmarkErr = shape.SQL(), args, err
 	}
 }
 
 func BenchmarkCompileCachedHit(b *testing.B) {
 	cache := NewStatementCache()
-	_, _, benchmarkErr = CompileCached(cache, benchmarkASTStatement())
+	_, _, benchmarkErr = CompileCached(
+		cache,
+		benchmarkASTStatement(),
+		[]any{benchmarkID, "second"},
+	)
 	if benchmarkErr != nil {
 		b.Fatal(benchmarkErr)
 	}
@@ -131,46 +139,29 @@ func BenchmarkCompileCachedHit(b *testing.B) {
 		shape, args, err := CompileCached(
 			cache,
 			benchmarkASTStatementWithValues(benchmarkID+1, "updated"),
+			[]any{benchmarkID + 1, "updated"},
 		)
 		benchmarkSQL, benchmarkArgs, benchmarkErr = shape.SQL(), args, err
 	}
 }
 
-// benchmarkCachedShape is a deliberately small stand-in for the future
-// CompiledStatement. The SQL is compiled once; the binder supplies current
-// values without putting them in the cached shape.
-type benchmarkCachedShape struct {
-	sql string
-}
-
-type benchmarkRuntimeValues struct {
-	id     int
-	second string
-}
-
-func benchmarkBuildCachedShape(stmt sst.StatementNode) benchmarkCachedShape {
-	sql, _, err := Compile(stmt)
-	if err != nil {
-		panic(err)
-	}
-	return benchmarkCachedShape{sql: sql}
-}
-
-func (s benchmarkCachedShape) bind(values benchmarkRuntimeValues) []any {
-	return []any{values.id, values.second}
-}
-
+// BenchmarkASTCompileCachedShape measures the warm path after the statement
+// shape and bind layout have already been prepared.
 func BenchmarkASTCompileCachedShape(b *testing.B) {
-	shape := benchmarkBuildCachedShape(benchmarkASTStatement())
-	values := benchmarkRuntimeValues{
-		id:     benchmarkID,
-		second: "second",
+	shape, err := Prepare(
+		NewStatementCache(),
+		benchmarkASTStatement(),
+		DefaultShapeContext(),
+	)
+	if err != nil {
+		b.Fatal(err)
 	}
+	args := []any{benchmarkID, "second"}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		benchmarkSQL = shape.sql
-		benchmarkArgs = shape.bind(values)
+		benchmarkArgs, benchmarkErr = shape.Bind(args)
+		benchmarkSQL = shape.SQL()
 	}
 }
