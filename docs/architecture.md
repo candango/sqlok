@@ -172,16 +172,28 @@ boundary becomes stable and package-cycle pressure justifies it.
 
 ## Join naming and rendering
 
-The current SELECT slice has one concrete join node: `Join`. The public
-`Join()` operation has inner-join semantics and renders the portable SQL token
-`JOIN`; a separate `InnerJoin()` API is not needed. `CrossJoin` remains a future
-explicit join type/API variant.
+The SELECT builder preserves join intent through explicit operations:
+
+```text
+Join       → JOIN
+InnerJoin  → INNER JOIN
+CrossJoin  → CROSS JOIN
+LeftJoin   → LEFT JOIN
+RightJoin  → RIGHT JOIN
+FullJoin   → FULL OUTER JOIN
+```
+
+Each operation creates the same `Join` node shape with a different `JoinType`.
+The current `.FullJoin(...)` API is semantically equivalent to SQLAlchemy's
+`join(..., full=True)`, although the explicit method may be less ergonomic.
+That API shape remains a review point when dialect support and additional join
+variants are developed.
 
 `Join` may be created before its `On` condition is supplied. If another `Join`
 is added, the previous join remains in the SST with `On == nil`, and the new
 join becomes the pending join. The compiler and dialect layer decide whether
-that syntax is valid for the target database. An explicit `CrossJoin` remains a
-future, clearer representation for portable cartesian-product intent.
+that syntax is valid for the target database. `CrossJoin` is the explicit
+representation for intentional cartesian-product behavior.
 
 ## FromSourceNode and Join representation
 
@@ -198,7 +210,7 @@ FromSourceNode
 ├── Table: TableRef
 └── Join: Join
     ├── Left: FromSourceNode (back-reference)
-    ├── JoinType: JOIN (inner join semantics)
+    ├── JoinType: JOIN / INNER / CROSS / LEFT / RIGHT / FULL OUTER
     ├── Right: FromSourceNode (next traversal point)
     └── On: Node
 ```

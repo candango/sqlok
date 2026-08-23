@@ -390,6 +390,34 @@ relationship.
 Source: [SQLAlchemy Selectable documentation](https://docs.sqlalchemy.org/en/20/core/selectable.html).
 Source: [SQLAlchemy selectable.py](https://github.com/sqlalchemy/sqlalchemy/blob/main/lib/sqlalchemy/sql/selectable.py).
 
+### FULL OUTER JOIN API shape
+
+SQLAlchemy exposes FULL OUTER JOIN at the same construction/AST boundary as
+other joins. Its API uses a flag on the join constructor:
+
+```python
+join(users, orders, onclause, full=True)
+```
+
+The resulting join carries the full-join intent, and the dialect/compiler emits
+`FULL OUTER JOIN` or an appropriate backend strategy. `outerjoin(..., full=True)`
+is the explicit outer-join helper form.
+
+`sqlok` currently expresses the same intent with:
+
+```go
+Select(...).From(users).FullJoin(orders).On(condition)
+```
+
+The semantic layer is equivalent, but the explicit method may be less ergonomic
+than SQLAlchemy's `full=True` flag. Revisit the public join API after more join
+variants and dialect behavior exist.
+
+Sources:
+
+- [SQLAlchemy join()](https://docs.sqlalchemy.org/en/21/core/selectable.html#sqlalchemy.sql.expression.join)
+- [SQLAlchemy outerjoin()](https://docs.sqlalchemy.org/en/21/core/selectable.html#sqlalchemy.sql.expression.outerjoin)
+
 ## SELECT public constructor and concrete statement type
 
 The SELECT API uses SQL terminology at its public boundary:
@@ -406,8 +434,9 @@ while keeping the public API aligned with SQL.
 
 The statement builder owns construction state for the JOIN chain. The source
 stored on the statement remains the root, while a separate tail-source cursor
-identifies the next source attachment point. The current AST has one concrete
-join node, `Join`; `InnerJoin` and `CrossJoin` variants are deferred.
+identifies the next source attachment point. The current AST uses one concrete
+`Join` node with a `JoinType` covering JOIN, INNER, CROSS, LEFT, RIGHT, and FULL
+OUTER join intent.
 
 A `pendingJoin` records the most recently created `Join`. Calling `On`
 completes that join. Calling another `Join` advances to a new pending join and
