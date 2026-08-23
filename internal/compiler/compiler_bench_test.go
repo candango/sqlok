@@ -77,15 +77,19 @@ func BenchmarkFunctionQueryWithJoinParts(b *testing.B) {
 }
 
 func benchmarkASTStatement() sst.StatementNode {
+	return benchmarkASTStatementWithValues(benchmarkID, "second")
+}
+
+func benchmarkASTStatementWithValues(id int, second string) sst.StatementNode {
 	return dql.Select(
 		sst.NewColumnRef("users", "id"),
-		sst.NewBindParam(benchmarkID),
+		sst.NewBindParam(id),
 	).
 		From(sst.NewTableRef("users")).
 		Join(sst.NewTableRef("orders")).
 		On(sst.Eq(
 			sst.NewColumnRef("users", "id"),
-			sst.NewBindParam("second"),
+			sst.NewBindParam(second),
 		))
 }
 
@@ -101,6 +105,40 @@ func BenchmarkASTCompileExistingStatement(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		benchmarkSQL, benchmarkArgs, benchmarkErr = Compile(stmt)
+	}
+}
+
+func BenchmarkCompileCachedMiss(b *testing.B) {
+	cache := NewStatementCache()
+	b.ReportAllocs()
+	for b.Loop() {
+		cache.Clear()
+		shape, args, err := CompileCached(
+			cache,
+			ShapeKey("benchmark-select"),
+			benchmarkASTStatement(),
+		)
+		benchmarkSQL, benchmarkArgs, benchmarkErr = shape.SQL(), args, err
+	}
+}
+
+func BenchmarkCompileCachedHit(b *testing.B) {
+	cache := NewStatementCache()
+	key := ShapeKey("benchmark-select")
+	_, _, benchmarkErr = CompileCached(cache, key, benchmarkASTStatement())
+	if benchmarkErr != nil {
+		b.Fatal(benchmarkErr)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		shape, args, err := CompileCached(
+			cache,
+			key,
+			benchmarkASTStatementWithValues(benchmarkID+1, "updated"),
+		)
+		benchmarkSQL, benchmarkArgs, benchmarkErr = shape.SQL(), args, err
 	}
 }
 

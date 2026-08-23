@@ -412,9 +412,15 @@ BenchmarkASTCompileEndToEnd
 BenchmarkASTCompileExistingStatement
   reuse an AST but traverse and render it on every iteration;
 
+BenchmarkCompileCachedMiss
+  compile and publish a shape on every cache miss;
+
+BenchmarkCompileCachedHit
+  build equivalent current statements, reuse the cached SQL shape, and collect
+  current values without re-rendering SQL;
+
 BenchmarkASTCompileCachedShape
-  compile the SQL shape once, then reuse the SQL template and bind current
-  values on the warm path.
+  reuse only the SQL template and a hand-written binder as an upper-bound POC.
 ```
 
 The cached-shape benchmark is deliberately a small upper-bound POC. Its bind
