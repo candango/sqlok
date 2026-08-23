@@ -26,12 +26,12 @@ func TestCompileCachedReusesShapeAndCollectsCurrentArgs(t *testing.T) {
 		sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(7)),
 	)
 
-	firstShape, firstArgs, err := CompileCached(cache, "users-by-id", first)
+	firstShape, firstArgs, err := CompileCached(cache, first)
 	assert.NoError(t, err)
 	assert.Equal(t, "SELECT users.id FROM users WHERE users.id = ?", firstShape.SQL())
 	assert.Equal(t, []any{42}, firstArgs)
 
-	secondShape, secondArgs, err := CompileCached(cache, "users-by-id", second)
+	secondShape, secondArgs, err := CompileCached(cache, second)
 	assert.NoError(t, err)
 	assert.Equal(t, firstShape.SQL(), secondShape.SQL())
 	assert.Equal(t, []any{7}, secondArgs)
@@ -64,19 +64,34 @@ func TestStatementCacheInvalidatesShape(t *testing.T) {
 	assert.Equal(t, 0, cache.Len())
 }
 
+func TestCompileCachedDerivesDifferentKeysForDifferentShapes(t *testing.T) {
+	cache := NewStatementCache()
+	first := dql.Select(sst.NewColumnRef("users", "id"))
+	second := dql.Select(sst.NewColumnRef("orders", "id"))
+
+	firstShape, _, err := CompileCached(cache, first)
+	assert.NoError(t, err)
+	secondShape, _, err := CompileCached(cache, second)
+	assert.NoError(t, err)
+
+	assert.NotEqual(t, firstShape.ShapeKey(), secondShape.ShapeKey())
+	assert.Equal(t, "SELECT users.id", firstShape.SQL())
+	assert.Equal(t, "SELECT orders.id", secondShape.SQL())
+	assert.Equal(t, 2, cache.Len())
+}
+
 func TestCompileCachedRebuildsAfterShapeInvalidation(t *testing.T) {
 	cache := NewStatementCache()
-	first := dql.Select(sst.NewLiteral(1))
-	second := dql.Select(sst.NewLiteral(2))
+	stmt := dql.Select(sst.NewLiteral(1))
 
-	shape, _, err := CompileCached(cache, "literal", first)
+	shape, _, err := CompileCached(cache, stmt)
 	assert.NoError(t, err)
 	assert.Equal(t, "SELECT 1", shape.SQL())
 
-	assert.True(t, cache.Invalidate("literal"))
-	shape, _, err = CompileCached(cache, "literal", second)
+	assert.True(t, cache.Invalidate(shape.ShapeKey()))
+	shape, _, err = CompileCached(cache, stmt)
 	assert.NoError(t, err)
-	assert.Equal(t, "SELECT 2", shape.SQL())
+	assert.Equal(t, "SELECT 1", shape.SQL())
 }
 
 func TestCompiledStatementBindLayoutCannotBeMutatedThroughAccessor(t *testing.T) {
@@ -118,9 +133,39 @@ func TestStatementCacheSupportsConcurrentReaders(t *testing.T) {
 func TestCompileCachedRejectsInvalidCacheInputs(t *testing.T) {
 	stmt := dql.Select(sst.NewLiteral(1))
 
-	_, _, err := CompileCached(nil, "constant", stmt)
+	_, _, err := CompileCached(nil, stmt)
 	assert.ErrorIs(t, err, ErrNilStatementCache)
 
-	_, _, err = CompileCached(NewStatementCache(), "", stmt)
-	assert.ErrorIs(t, err, ErrEmptyShapeKey)
+	_, _, err = CompileCachedWithContext(NewStatementCache(), stmt, ShapeContext{})
+	assert.ErrorIs(t, err, ErrInvalidShapeContext)
+}
+
+func TestCompileCachedIncludesShapeContext(t *testing.T) {
+	stmt := dql.Select(sst.NewColumnRef("users", "id"))
+	cache := NewStatementCache()
+	postgres := ShapeContext{Dialect: "postgres", CompilerVersion: "compiler-v1"}
+	sqlite := ShapeContext{Dialect: "sqlite", CompilerVersion: "compiler-v1"}
+
+	postgresShape, _, err := CompileCachedWithContext(cache, stmt, postgres)
+	assert.NoError(t, err)
+	sqliteShape, _, err := CompileCachedWithContext(cache, stmt, sqlite)
+	assert.NoError(t, err)
+
+	assert.NotEqual(t, postgresShape.ShapeKey(), sqliteShape.ShapeKey())
+	assert.Equal(t, "postgres", postgresShape.Dialect())
+	assert.Equal(t, "sqlite", sqliteShape.Dialect())
+	assert.Equal(t, 2, cache.Len())
+}
+
+func TestDeriveShapeKeyIgnoresBindValues(t *testing.T) {
+	context := DefaultShapeContext()
+	first := dql.Select(sst.NewBindParam(1))
+	second := dql.Select(sst.NewBindParam(2))
+
+	firstKey, err := DeriveShapeKey(first, context)
+	assert.NoError(t, err)
+	secondKey, err := DeriveShapeKey(second, context)
+	assert.NoError(t, err)
+
+	assert.Equal(t, firstKey, secondKey)
 }

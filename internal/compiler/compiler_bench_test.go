@@ -113,19 +113,14 @@ func BenchmarkCompileCachedMiss(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		cache.Clear()
-		shape, args, err := CompileCached(
-			cache,
-			ShapeKey("benchmark-select"),
-			benchmarkASTStatement(),
-		)
+		shape, args, err := CompileCached(cache, benchmarkASTStatement())
 		benchmarkSQL, benchmarkArgs, benchmarkErr = shape.SQL(), args, err
 	}
 }
 
 func BenchmarkCompileCachedHit(b *testing.B) {
 	cache := NewStatementCache()
-	key := ShapeKey("benchmark-select")
-	_, _, benchmarkErr = CompileCached(cache, key, benchmarkASTStatement())
+	_, _, benchmarkErr = CompileCached(cache, benchmarkASTStatement())
 	if benchmarkErr != nil {
 		b.Fatal(benchmarkErr)
 	}
@@ -135,7 +130,6 @@ func BenchmarkCompileCachedHit(b *testing.B) {
 	for b.Loop() {
 		shape, args, err := CompileCached(
 			cache,
-			key,
 			benchmarkASTStatementWithValues(benchmarkID+1, "updated"),
 		)
 		benchmarkSQL, benchmarkArgs, benchmarkErr = shape.SQL(), args, err

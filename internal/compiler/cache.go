@@ -3,10 +3,13 @@ package compiler
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/candango/sqlok/internal/sst"
 )
+
+const defaultCompilerVersion = "compiler-v1"
 
 var (
 	// ErrNilStatementCache reports an attempt to compile through a nil cache.
@@ -14,11 +17,36 @@ var (
 
 	// ErrEmptyShapeKey reports a cache operation without a canonical shape key.
 	ErrEmptyShapeKey = errors.New("statement shape key cannot be empty")
+
+	// ErrInvalidShapeContext reports incomplete dialect/compiler identity.
+	ErrInvalidShapeContext = errors.New("statement shape context is incomplete")
 )
 
 // ShapeKey identifies one canonical statement shape. Runtime values must not
 // be included in the key.
 type ShapeKey string
+
+// ShapeContext identifies the rendering inputs that affect a statement shape.
+type ShapeContext struct {
+	Dialect         string
+	CompilerVersion string
+}
+
+// DefaultShapeContext returns the current default compiler identity.
+func DefaultShapeContext() ShapeContext {
+	return ShapeContext{
+		Dialect:         "default",
+		CompilerVersion: defaultCompilerVersion,
+	}
+}
+
+func (c ShapeContext) validate() error {
+	if strings.TrimSpace(c.Dialect) == "" ||
+		strings.TrimSpace(c.CompilerVersion) == "" {
+		return ErrInvalidShapeContext
+	}
+	return nil
+}
 
 // Binding identifies one runtime value position in a compiled statement.
 type Binding struct {
@@ -32,8 +60,11 @@ func (b Binding) Position() int {
 
 // CompiledStatement is an immutable SQL template and its bind layout.
 type CompiledStatement struct {
-	sql        string
-	bindLayout []Binding
+	sql             string
+	bindLayout      []Binding
+	shapeKey        ShapeKey
+	dialect         string
+	compilerVersion string
 }
 
 // SQL returns the placeholder-based SQL template.
@@ -44,6 +75,22 @@ func (s CompiledStatement) SQL() string {
 // BindLayout returns a copy of the immutable binding layout.
 func (s CompiledStatement) BindLayout() []Binding {
 	return append([]Binding(nil), s.bindLayout...)
+}
+
+// ShapeKey returns the canonical identity of the compiled statement.
+func (s CompiledStatement) ShapeKey() ShapeKey {
+	return s.shapeKey
+}
+
+// Dialect returns the dialect identity used during compilation.
+func (s CompiledStatement) Dialect() string {
+	return s.dialect
+}
+
+// CompilerVersion returns the compiler artifact version used during
+// compilation.
+func (s CompiledStatement) CompilerVersion() string {
+	return s.compilerVersion
 }
 
 // Bind validates the current runtime argument count for this statement shape.
@@ -140,25 +187,54 @@ func (c *StatementCache) Len() int {
 	return length
 }
 
-// CompileShape compiles a statement into an immutable shape without retaining
-// its current runtime values.
+// CompileShape compiles a statement into an immutable shape using the default
+// shape context without retaining its current runtime values.
 func CompileShape(stmt sst.StatementNode) (CompiledStatement, error) {
-	shape, _, err := compileStatement(stmt)
+	return CompileShapeWithContext(stmt, DefaultShapeContext())
+}
+
+// CompileShapeWithContext compiles a statement using explicit rendering
+// identity without retaining its current runtime values.
+func CompileShapeWithContext(
+	stmt sst.StatementNode,
+	context ShapeContext,
+) (CompiledStatement, error) {
+	if err := context.validate(); err != nil {
+		return CompiledStatement{}, err
+	}
+	key, err := DeriveShapeKey(stmt, context)
+	if err != nil {
+		return CompiledStatement{}, err
+	}
+	shape, _, err := compileStatement(stmt, context, key)
 	return shape, err
 }
 
-// CompileCached returns a cached SQL shape and the current bound values. Cache
-// hits collect current values without re-rendering the SQL template.
+// CompileCached returns a cached SQL shape and the current bound values using
+// the default shape context. The shape key is derived from the statement.
 func CompileCached(
 	cache *StatementCache,
-	key ShapeKey,
 	stmt sst.StatementNode,
+) (CompiledStatement, []any, error) {
+	return CompileCachedWithContext(cache, stmt, DefaultShapeContext())
+}
+
+// CompileCachedWithContext returns a cached SQL shape and current bound values.
+// The shape key is derived from canonical statement structure and context.
+func CompileCachedWithContext(
+	cache *StatementCache,
+	stmt sst.StatementNode,
+	context ShapeContext,
 ) (CompiledStatement, []any, error) {
 	if cache == nil {
 		return CompiledStatement{}, nil, ErrNilStatementCache
 	}
-	if key == "" {
-		return CompiledStatement{}, nil, ErrEmptyShapeKey
+	if err := context.validate(); err != nil {
+		return CompiledStatement{}, nil, err
+	}
+	key, err := DeriveShapeKey(stmt, context)
+	if err != nil {
+		return CompiledStatement{}, nil, err
 	}
 
 	if shape, ok := cache.Get(key); ok {
@@ -173,7 +249,7 @@ func CompileCached(
 		return shape, args, nil
 	}
 
-	shape, args, err := compileStatement(stmt)
+	shape, args, err := compileStatement(stmt, context, key)
 	if err != nil {
 		return CompiledStatement{}, nil, err
 	}
@@ -186,12 +262,16 @@ func CompileCached(
 	return shape, args, nil
 }
 
-func compileStatement(stmt sst.StatementNode) (CompiledStatement, []any, error) {
+func compileStatement(
+	stmt sst.StatementNode,
+	context ShapeContext,
+	key ShapeKey,
+) (CompiledStatement, []any, error) {
 	sqlText, args, err := Compile(stmt)
 	if err != nil {
 		return CompiledStatement{}, nil, err
 	}
-	return newCompiledStatement(sqlText, len(args)), args, nil
+	return newCompiledStatementWithContext(sqlText, len(args), key, context), args, nil
 }
 
 func cloneCompiledStatement(shape CompiledStatement) CompiledStatement {
@@ -200,12 +280,30 @@ func cloneCompiledStatement(shape CompiledStatement) CompiledStatement {
 }
 
 func newCompiledStatement(sqlText string, argumentCount int) CompiledStatement {
+	context := DefaultShapeContext()
+	return newCompiledStatementWithContext(
+		sqlText,
+		argumentCount,
+		ShapeKey("manual-test-shape"),
+		context,
+	)
+}
+
+func newCompiledStatementWithContext(
+	sqlText string,
+	argumentCount int,
+	key ShapeKey,
+	context ShapeContext,
+) CompiledStatement {
 	bindLayout := make([]Binding, argumentCount)
 	for position := range bindLayout {
 		bindLayout[position] = Binding{position: position}
 	}
 	return CompiledStatement{
-		sql:        sqlText,
-		bindLayout: bindLayout,
+		sql:             sqlText,
+		bindLayout:      bindLayout,
+		shapeKey:        key,
+		dialect:         context.Dialect,
+		compilerVersion: context.CompilerVersion,
 	}
 }
