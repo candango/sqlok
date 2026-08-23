@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/candango/sqlok/internal/dialect"
@@ -18,26 +19,45 @@ func CompileWithContext(
 	stmt sst.StatementNode,
 	context ShapeContext,
 ) (string, []any, error) {
-	if err := context.validate(); err != nil {
+	sqlText, args, bindings, err := compileWithContext(stmt, context)
+	if err != nil {
 		return "", nil, err
 	}
+	if len(args) != len(bindings) {
+		return "", nil, fmt.Errorf(
+			"%w: expected %d arguments, got %d",
+			ErrUnboundParameterSlot,
+			len(bindings),
+			len(args),
+		)
+	}
+	return sqlText, args, nil
+}
+
+func compileWithContext(
+	stmt sst.StatementNode,
+	context ShapeContext,
+) (string, []any, []Binding, error) {
+	if err := context.validate(); err != nil {
+		return "", nil, nil, err
+	}
 	if err := stmt.Err(); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 
 	c := &Compiler{dialect: context.Dialect}
 	if err := stmt.Accept(c); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	return strings.Join(c.parts, ""), c.args, nil
+	return strings.Join(c.parts, ""), c.args, c.bindings, nil
 }
 
 // Compiler walks SQL semantic tree nodes and renders SQL.
 type Compiler struct {
-	parts        []string
-	args         []any
-	dialect      dialect.Dialect
-	bindPosition int
+	parts    []string
+	args     []any
+	bindings []Binding
+	dialect  dialect.Dialect
 }
 
 var _ sst.Visitor = (*Compiler)(nil)
@@ -57,11 +77,29 @@ func (c *Compiler) VisitClause(clause sst.ClauseNode) error {
 // VisitExpression renders the current expression node. Composite binary
 // expressions have already traversed their operands before this call.
 func (c *Compiler) VisitExpression(expr sst.ExpressionNode) error {
-	if param, ok := expr.(sst.BindParamNode); ok {
-		return c.bind(param.Value())
+	text, ok := expr.(sst.ExpressionTextNode)
+	if !ok {
+		return fmt.Errorf("expression %T has no SQL text", expr)
 	}
-	c.parts = append(c.parts, expr.Expr())
+	c.parts = append(c.parts, text.Expr())
 	return nil
+}
+
+// VisitBindParam renders a runtime bind parameter through the dialect.
+func (c *Compiler) VisitBindParam(param sst.BindParamNode) error {
+	return c.bind(SlotBind, param.Value())
+}
+
+// VisitParameterSlot reserves a runtime position without requiring a value.
+func (c *Compiler) VisitParameterSlot(slot sst.ParameterSlotNode) error {
+	if slot.Position() != len(c.bindings) {
+		return fmt.Errorf(
+			"parameter slot expects position %d, got %d",
+			len(c.bindings),
+			slot.Position(),
+		)
+	}
+	return c.reserve(SlotParameter, nil, false)
 }
 
 // VisitExpressionGroupStart renders the opening parenthesis of a grouped
@@ -190,17 +228,24 @@ func (c *Compiler) VisitOrderItem(item sst.OrderItemNode) error {
 
 // VisitLimit renders the SELECT row limit as a runtime bind slot.
 func (c *Compiler) VisitLimit(limit sst.LimitNode) error {
-	return c.bind(limit.Value())
+	return c.bind(SlotLimit, limit.Value())
 }
 
 // VisitOffset renders the SELECT row offset as a runtime bind slot.
 func (c *Compiler) VisitOffset(offset sst.OffsetNode) error {
-	return c.bind(offset.Value())
+	return c.bind(SlotOffset, offset.Value())
 }
 
-func (c *Compiler) bind(value any) error {
-	c.parts = append(c.parts, c.dialect.Placeholder(c.bindPosition))
-	c.args = append(c.args, value)
-	c.bindPosition++
+func (c *Compiler) bind(kind SlotKind, value any) error {
+	return c.reserve(kind, value, true)
+}
+
+func (c *Compiler) reserve(kind SlotKind, value any, hasValue bool) error {
+	position := len(c.bindings)
+	c.parts = append(c.parts, c.dialect.Placeholder(position))
+	c.bindings = append(c.bindings, Binding{position: position, kind: kind})
+	if hasValue {
+		c.args = append(c.args, value)
+	}
 	return nil
 }

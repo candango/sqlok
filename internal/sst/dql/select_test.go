@@ -33,6 +33,14 @@ func (v *fakeVisitor) VisitExpression(expr sst.ExpressionNode) error {
 	return nil
 }
 
+func (v *fakeVisitor) VisitBindParam(sst.BindParamNode) error {
+	return nil
+}
+
+func (v *fakeVisitor) VisitParameterSlot(sst.ParameterSlotNode) error {
+	return nil
+}
+
 func (v *fakeVisitor) VisitExpressionGroupStart() error {
 	return nil
 }
@@ -144,18 +152,32 @@ func (v *traversingVisitor) VisitExpression(expr sst.ExpressionNode) error {
 		v.visitedBinaryExpressions++
 		v.joinEvents = append(
 			v.joinEvents,
-			"binary:"+e.Left().Expr()+string(e.Expr())+e.Right().Expr(),
+			"binary:"+expressionText(e.Left())+string(e.Expr())+expressionText(e.Right()),
 		)
 	case sst.LogicalExpressionNode:
 		v.visitedLogicalOperators++
 	case *sst.NotExpression:
 		v.visitedNotExpressions++
-	case sst.BindParamNode:
-		v.bindParams = append(v.bindParams, e.Value())
 	case *sst.Literal:
 		v.visitedLiterals++
 	}
 	return nil
+}
+
+func (v *traversingVisitor) VisitBindParam(param sst.BindParamNode) error {
+	v.bindParams = append(v.bindParams, param.Value())
+	return nil
+}
+
+func (v *traversingVisitor) VisitParameterSlot(sst.ParameterSlotNode) error {
+	return nil
+}
+
+func expressionText(expr sst.ExpressionNode) string {
+	if text, ok := expr.(sst.ExpressionTextNode); ok {
+		return text.Expr()
+	}
+	return "<parameter>"
 }
 
 func (v *traversingVisitor) VisitExpressionGroupStart() error {
@@ -501,7 +523,7 @@ func TestSelectJoinTraversalChain(t *testing.T) {
 			"join",
 			"orders",
 			"on",
-			"binary:users.id = ?",
+			"binary:users.id = <parameter>",
 		}, visitor.joinEvents)
 	})
 

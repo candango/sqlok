@@ -60,11 +60,21 @@ func (f *shapeFingerprint) VisitClause(clause sst.ClauseNode) error {
 }
 
 func (f *shapeFingerprint) VisitExpression(expr sst.ExpressionNode) error {
-	if _, ok := expr.(sst.BindParamNode); ok {
-		f.token("bind")
-		return nil
+	text, ok := expr.(sst.ExpressionTextNode)
+	if !ok {
+		return fmt.Errorf("expression %T has no SQL text", expr)
 	}
-	f.token("expression", expr.Expr())
+	f.token("expression", text.Expr())
+	return nil
+}
+
+func (f *shapeFingerprint) VisitBindParam(sst.BindParamNode) error {
+	f.token("bind")
+	return nil
+}
+
+func (f *shapeFingerprint) VisitParameterSlot(slot sst.ParameterSlotNode) error {
+	f.token("parameter-slot", strconv.Itoa(slot.Position()))
 	return nil
 }
 

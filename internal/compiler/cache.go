@@ -21,6 +21,12 @@ var (
 
 	// ErrInvalidShapeContext reports incomplete dialect/compiler identity.
 	ErrInvalidShapeContext = errors.New("statement shape context is incomplete")
+
+	// ErrUnboundParameterSlot reports a value-compilation attempt for a
+	// shape-only parameter slot.
+	ErrUnboundParameterSlot = errors.New(
+		"compiled statement contains unbound parameter slots",
+	)
 )
 
 // ShapeKey identifies one canonical statement shape. Runtime values must not
@@ -52,14 +58,30 @@ func (c ShapeContext) validate() error {
 	return nil
 }
 
+// SlotKind identifies the source of one runtime argument position.
+type SlotKind string
+
+const (
+	SlotBind      SlotKind = "bind"
+	SlotParameter SlotKind = "parameter"
+	SlotLimit     SlotKind = "limit"
+	SlotOffset    SlotKind = "offset"
+)
+
 // Binding identifies one runtime value position in a compiled statement.
 type Binding struct {
 	position int
+	kind     SlotKind
 }
 
 // Position returns the zero-based runtime argument position.
 func (b Binding) Position() int {
 	return b.position
+}
+
+// Kind returns the source kind of the runtime argument position.
+func (b Binding) Kind() SlotKind {
+	return b.kind
 }
 
 // CompiledStatement is an immutable SQL template and its bind layout.
@@ -279,11 +301,11 @@ func compileStatement(
 	context ShapeContext,
 	key ShapeKey,
 ) (CompiledStatement, []any, error) {
-	sqlText, args, err := Compile(stmt)
+	sqlText, args, bindings, err := compileWithContext(stmt, context)
 	if err != nil {
 		return CompiledStatement{}, nil, err
 	}
-	return newCompiledStatementWithContext(sqlText, len(args), key, context), args, nil
+	return newCompiledStatementWithContext(sqlText, bindings, key, context), args, nil
 }
 
 func cloneCompiledStatement(shape CompiledStatement) CompiledStatement {
@@ -293,9 +315,16 @@ func cloneCompiledStatement(shape CompiledStatement) CompiledStatement {
 
 func newCompiledStatement(sqlText string, argumentCount int) CompiledStatement {
 	context := DefaultShapeContext()
+	bindings := make([]Binding, argumentCount)
+	for position := range bindings {
+		bindings[position] = Binding{
+			position: position,
+			kind:     SlotBind,
+		}
+	}
 	return newCompiledStatementWithContext(
 		sqlText,
-		argumentCount,
+		bindings,
 		ShapeKey("manual-test-shape"),
 		context,
 	)
@@ -303,17 +332,13 @@ func newCompiledStatement(sqlText string, argumentCount int) CompiledStatement {
 
 func newCompiledStatementWithContext(
 	sqlText string,
-	argumentCount int,
+	bindings []Binding,
 	key ShapeKey,
 	context ShapeContext,
 ) CompiledStatement {
-	bindLayout := make([]Binding, argumentCount)
-	for position := range bindLayout {
-		bindLayout[position] = Binding{position: position}
-	}
 	return CompiledStatement{
 		sql:             sqlText,
-		bindLayout:      bindLayout,
+		bindLayout:      append([]Binding(nil), bindings...),
 		shapeKey:        key,
 		dialect:         string(context.Dialect.Name()),
 		compilerVersion: context.CompilerVersion,

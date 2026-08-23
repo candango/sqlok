@@ -6,9 +6,16 @@ import (
 )
 
 // ExpressionNode represents a SQL expression that can participate in a
-// projection or expression operation.
+// projection or expression operation. Rendering is dispatched through the
+// visitor because runtime parameters do not carry placeholder text.
 type ExpressionNode interface {
 	Node
+}
+
+// ExpressionTextNode represents an expression whose SQL text is owned by the
+// node rather than produced by a runtime binding path.
+type ExpressionTextNode interface {
+	ExpressionNode
 	Expr() string
 }
 
@@ -33,7 +40,7 @@ func expressionPrecedence(expr ExpressionNode) int {
 
 // BinaryExpressionNode represents an expression with two expression operands.
 type BinaryExpressionNode interface {
-	ExpressionNode
+	ExpressionTextNode
 	Left() ExpressionNode
 	Operator() ComparisonOperator
 	Right() ExpressionNode
@@ -42,7 +49,7 @@ type BinaryExpressionNode interface {
 // LogicalExpressionNode represents a logical operation over one or more
 // expressions.
 type LogicalExpressionNode interface {
-	ExpressionNode
+	ExpressionTextNode
 	Operands() []ExpressionNode
 	Operator() BooleanOperator
 }
@@ -54,6 +61,15 @@ type BindParamNode interface {
 
 	// Value returns the runtime argument associated with the node.
 	Value() any
+}
+
+// ParameterSlotNode represents a declared runtime argument position without a
+// value available during shape compilation.
+type ParameterSlotNode interface {
+	Node
+
+	// Position returns the zero-based runtime argument position.
+	Position() int
 }
 
 // BinaryExpression represents a comparison between two expressions.
@@ -298,20 +314,37 @@ func NewBindParam(value any) *BindParam {
 	return &BindParam{value: value}
 }
 
-// Accept dispatches the bind-parameter expression to the provided visitor.
+// Accept dispatches the bind parameter to its dedicated visitor method.
 func (p *BindParam) Accept(v Visitor) error {
-	return v.VisitExpression(p)
-}
-
-// Expr returns the legacy placeholder representation required by the
-// ExpressionNode contract. Dialect-aware compiler paths do not use this value.
-func (p *BindParam) Expr() string {
-	return "?"
+	return v.VisitBindParam(p)
 }
 
 // Value returns the runtime value collected by the compiler.
 func (p *BindParam) Value() any {
 	return p.value
+}
+
+// ParameterSlot represents a runtime position declared without a value.
+type ParameterSlot struct {
+	position int
+}
+
+var _ ParameterSlotNode = (*ParameterSlot)(nil)
+
+// NewParameterSlot creates a zero-based runtime parameter slot.
+func NewParameterSlot(position int) *ParameterSlot {
+	return &ParameterSlot{position: position}
+}
+
+// Accept dispatches the parameter slot to its dedicated visitor method.
+func (p *ParameterSlot) Accept(v Visitor) error {
+	return v.VisitParameterSlot(p)
+}
+
+// Position returns the zero-based runtime argument position declared by the
+// slot.
+func (p *ParameterSlot) Position() int {
+	return p.position
 }
 
 // Literal represents an expression rendered directly as SQL text.

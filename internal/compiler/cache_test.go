@@ -67,6 +67,58 @@ func TestCompileCachedReusesShapeForDifferentPaginationValues(t *testing.T) {
 	assert.Equal(t, 1, cache.Len())
 }
 
+func TestCompileShapeUsesExplicitParameterSlots(t *testing.T) {
+	shape, err := CompileShape(dql.Select(sst.NewParameterSlot(0)))
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT ?", shape.SQL())
+	assert.Equal(t, []Binding{{position: 0, kind: SlotParameter}}, shape.BindLayout())
+	assert.NoError(t, func() error {
+		_, bindErr := shape.Bind([]any{"value"})
+		return bindErr
+	}())
+}
+
+func TestCompileRejectsShapeOnlyParameterSlot(t *testing.T) {
+	_, _, err := Compile(dql.Select(sst.NewParameterSlot(0)))
+
+	assert.ErrorIs(t, err, ErrUnboundParameterSlot)
+}
+
+func TestCompileRejectsMixedShapeAndRuntimeSlots(t *testing.T) {
+	_, _, err := Compile(dql.Select(
+		sst.NewParameterSlot(0),
+		sst.NewBindParam(42),
+	))
+
+	assert.ErrorIs(t, err, ErrUnboundParameterSlot)
+}
+
+func TestCompileRejectsOutOfOrderParameterSlot(t *testing.T) {
+	_, _, err := Compile(dql.Select(sst.NewParameterSlot(1)))
+
+	assert.EqualError(t, err, "parameter slot expects position 0, got 1")
+}
+
+func TestCompileShapeRecordsSlotKinds(t *testing.T) {
+	shape, err := CompileShape(
+		dql.Select(sst.NewColumnRef("users", "id")).
+			Where(sst.Eq(
+				sst.NewColumnRef("users", "id"),
+				sst.NewBindParam(42),
+			)).
+			Limit(10).
+			Offset(20),
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, []Binding{
+		{position: 0, kind: SlotBind},
+		{position: 1, kind: SlotLimit},
+		{position: 2, kind: SlotOffset},
+	}, shape.BindLayout())
+}
+
 func TestCompiledStatementBindRejectsWrongArgumentCount(t *testing.T) {
 	shape := newCompiledStatement("SELECT ?", 1)
 

@@ -65,6 +65,12 @@ type Visitor interface {
 	// VisitExpression visits an expression node for SQL rendering.
 	VisitExpression(ExpressionNode) error
 
+	// VisitBindParam visits a runtime bind parameter.
+	VisitBindParam(BindParamNode) error
+
+	// VisitParameterSlot visits a declared runtime argument position.
+	VisitParameterSlot(ParameterSlotNode) error
+
 	// VisitExpressionGroupStart renders the start of a grouped expression.
 	VisitExpressionGroupStart() error
 
