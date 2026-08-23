@@ -194,6 +194,52 @@ func TestCompileSelectWithOrderBy(t *testing.T) {
 	assert.Empty(t, args)
 }
 
+func TestCompileSelectWithEmptyOrderBy(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).OrderBy()
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users", sql)
+	assert.Empty(t, args)
+}
+
+func TestCompileSelectWithClearedOrderBy(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).OrderBy(
+		sst.Desc(sst.NewColumnRef("users", "name")),
+	).ClearOrderBy()
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users", sql)
+	assert.Empty(t, args)
+}
+
+func TestCompileSelectOrderByDefaultsToAscending(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).OrderBy(
+		sst.NewOrderItem(sst.NewColumnRef("users", "name")),
+	)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users ORDER BY users.name ASC", sql)
+	assert.Empty(t, args)
+}
+
 func TestCompileSelectWithFromAndJoin(t *testing.T) {
 
 	t.Run("should have from and join", func(t *testing.T) {

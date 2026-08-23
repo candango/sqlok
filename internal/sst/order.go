@@ -52,6 +52,7 @@ type OrderItemOption func(*OrderItem)
 func NewOrderItem(expr ExpressionNode, options ...OrderItemOption) *OrderItem {
 	oi := &OrderItem{
 		expression: expr,
+		direction:  AscDirection,
 	}
 
 	for _, option := range options {
