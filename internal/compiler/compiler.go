@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/candango/sqlok/internal/sst"
@@ -142,5 +143,11 @@ func (c *Compiler) VisitTableRef(table sst.TableRefNode) error {
 
 func (c *Compiler) VisitOrderItem(item sst.OrderItemNode) error {
 	c.parts = append(c.parts, " ", string(item.Direction()))
+	return nil
+}
+
+// VisitLimit renders the SELECT row limit value.
+func (c *Compiler) VisitLimit(limit sst.LimitNode) error {
+	c.parts = append(c.parts, strconv.Itoa(limit.Value()))
 	return nil
 }

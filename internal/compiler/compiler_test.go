@@ -240,6 +240,59 @@ func TestCompileSelectOrderByDefaultsToAscending(t *testing.T) {
 	assert.Empty(t, args)
 }
 
+func TestCompileSelectWithLimit(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Limit(10)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users LIMIT 10", sql)
+	assert.Empty(t, args)
+}
+
+func TestCompileSelectWithRepeatedLimitUsesLastValue(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Limit(10).
+		Limit(20)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users LIMIT 20", sql)
+	assert.Empty(t, args)
+}
+
+func TestCompileSelectWithZeroLimit(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Limit(0)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users LIMIT 0", sql)
+	assert.Empty(t, args)
+}
+
+func TestCompileSelectRejectsNegativeLimit(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).Limit(-1)
+
+	_, _, err := Compile(stmt)
+
+	assert.EqualError(t, err, "LIMIT cannot be negative")
+}
+
 func TestCompileSelectWithFromAndJoin(t *testing.T) {
 
 	t.Run("should have from and join", func(t *testing.T) {

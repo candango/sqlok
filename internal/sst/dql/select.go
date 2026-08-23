@@ -17,6 +17,7 @@ type SelectStatement struct {
 	pendingJoin *Join
 	where       *whereClause
 	orderBy     *orderByClause
+	limit       *limitClause
 	err         error
 }
 
@@ -65,6 +66,14 @@ func (s *SelectStatement) Accept(v sst.Visitor) error {
 			return err
 		}
 		if err := s.orderBy.Accept(v); err != nil {
+			return err
+		}
+	}
+	if s.limit != nil {
+		if err := v.VisitClause(s.limit); err != nil {
+			return err
+		}
+		if err := s.limit.Accept(v); err != nil {
 			return err
 		}
 	}
@@ -243,6 +252,21 @@ func (s *SelectStatement) ClearOrderBy() sst.SelectBuilder {
 	return s
 }
 
+// Limit sets the maximum number of rows returned by the SELECT statement.
+// Zero is valid; negative values are recorded as a construction error.
+func (s *SelectStatement) Limit(value int) sst.SelectBuilder {
+	if s.err != nil {
+		return s
+	}
+	if value < 0 {
+		s.err = errors.New("LIMIT cannot be negative")
+		return s
+	}
+
+	s.limit = newLimitClause(value)
+	return s
+}
+
 // Source returns the primary FROM source.
 func (s *SelectStatement) Source() sst.FromSourceNode {
 	return s.source
@@ -282,6 +306,28 @@ func (c *orderByClause) Declaration() string {
 
 func (c *orderByClause) Accept(v sst.Visitor) error {
 	return c.items.Accept(v)
+}
+
+type limitClause struct {
+	value int
+}
+
+var _ sst.LimitNode = (*limitClause)(nil)
+
+func newLimitClause(value int) *limitClause {
+	return &limitClause{value: value}
+}
+
+func (l *limitClause) Declaration() string {
+	return "LIMIT"
+}
+
+func (l *limitClause) Value() int {
+	return l.value
+}
+
+func (l *limitClause) Accept(v sst.Visitor) error {
+	return v.VisitLimit(l)
 }
 
 // FromSource represents a SELECT source table and its next attached join.

@@ -61,6 +61,10 @@ func (v *fakeVisitor) VisitOrderItem(s sst.OrderItemNode) error {
 	return nil
 }
 
+func (v *fakeVisitor) VisitLimit(s sst.LimitNode) error {
+	return nil
+}
+
 type fakeExpr struct{}
 
 func (e *fakeExpr) Accept(v sst.Visitor) error {
@@ -76,6 +80,8 @@ type traversingVisitor struct {
 	visitedOrderBy           bool
 	visitedOrderItems        int
 	orderDirections          []sst.OrderDirection
+	visitedLimit             bool
+	limitValues              []int
 	visitedJoin              bool
 	joinEvents               []string
 	visitedBinaryExpressions int
@@ -104,6 +110,8 @@ func (v *traversingVisitor) VisitClause(s sst.ClauseNode) error {
 		v.visitedWhere = true
 	case "ORDER BY":
 		v.visitedOrderBy = true
+	case "LIMIT":
+		v.visitedLimit = true
 	}
 	return nil
 }
@@ -186,6 +194,11 @@ func (v *traversingVisitor) VisitJoin(j sst.JoinNode) error {
 func (v *traversingVisitor) VisitOrderItem(item sst.OrderItemNode) error {
 	v.visitedOrderItems++
 	v.orderDirections = append(v.orderDirections, item.Direction())
+	return nil
+}
+
+func (v *traversingVisitor) VisitLimit(limit sst.LimitNode) error {
+	v.limitValues = append(v.limitValues, limit.Value())
 	return nil
 }
 
@@ -317,6 +330,19 @@ func TestSelectOrderByTraversal(t *testing.T) {
 		sst.AscDirection,
 		sst.DescDirection,
 	}, visitor.orderDirections)
+}
+
+func TestSelectLimitTraversal(t *testing.T) {
+	visitor := &traversingVisitor{}
+	stmt := Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Limit(10)
+
+	assert.NoError(t, stmt.Accept(visitor))
+	assert.True(t, visitor.visitedLimit)
+	assert.Equal(t, []int{10}, visitor.limitValues)
 }
 
 func TestSelectJoinTraversalChain(t *testing.T) {

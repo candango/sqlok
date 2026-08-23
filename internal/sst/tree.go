@@ -82,6 +82,9 @@ type Visitor interface {
 	// VisitOrderItem visits an ORDER BY item after its expression.
 	VisitOrderItem(OrderItemNode) error
 
+	// VisitLimit visits a SELECT row limit.
+	VisitLimit(LimitNode) error
+
 	// VisitStatement visits a SQL statement declaration.
 	VisitStatement(StatementNode) error
 

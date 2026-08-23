@@ -48,4 +48,7 @@ type SelectBuilder interface {
 
 	// ClearOrderBy removes all ORDER BY items from the SELECT statement.
 	ClearOrderBy() SelectBuilder
+
+	// Limit sets the maximum number of rows returned by the SELECT statement.
+	Limit(int) SelectBuilder
 }
