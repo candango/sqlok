@@ -151,3 +151,9 @@ func (c *Compiler) VisitLimit(limit sst.LimitNode) error {
 	c.parts = append(c.parts, strconv.Itoa(limit.Value()))
 	return nil
 }
+
+// VisitOffset renders the SELECT row offset value.
+func (c *Compiler) VisitOffset(offset sst.OffsetNode) error {
+	c.parts = append(c.parts, strconv.Itoa(offset.Value()))
+	return nil
+}

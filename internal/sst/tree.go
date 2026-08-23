@@ -85,6 +85,9 @@ type Visitor interface {
 	// VisitLimit visits a SELECT row limit.
 	VisitLimit(LimitNode) error
 
+	// VisitOffset visits a SELECT row offset.
+	VisitOffset(OffsetNode) error
+
 	// VisitStatement visits a SQL statement declaration.
 	VisitStatement(StatementNode) error
 

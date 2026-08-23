@@ -293,6 +293,59 @@ func TestCompileSelectRejectsNegativeLimit(t *testing.T) {
 	assert.EqualError(t, err, "LIMIT cannot be negative")
 }
 
+func TestCompileSelectWithOffset(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Offset(10)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users OFFSET 10", sql)
+	assert.Empty(t, args)
+}
+
+func TestCompileSelectWithRepeatedOffsetUsesLastValue(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Offset(10).
+		Offset(20)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users OFFSET 20", sql)
+	assert.Empty(t, args)
+}
+
+func TestCompileSelectWithZeroOffset(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Offset(0)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users OFFSET 0", sql)
+	assert.Empty(t, args)
+}
+
+func TestCompileSelectRejectsNegativeOffset(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).Offset(-1)
+
+	_, _, err := Compile(stmt)
+
+	assert.EqualError(t, err, "OFFSET cannot be negative")
+}
+
 func TestCompileSelectWithFromAndJoin(t *testing.T) {
 
 	t.Run("should have from and join", func(t *testing.T) {

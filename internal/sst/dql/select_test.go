@@ -65,6 +65,10 @@ func (v *fakeVisitor) VisitLimit(s sst.LimitNode) error {
 	return nil
 }
 
+func (v *fakeVisitor) VisitOffset(s sst.OffsetNode) error {
+	return nil
+}
+
 type fakeExpr struct{}
 
 func (e *fakeExpr) Accept(v sst.Visitor) error {
@@ -82,6 +86,8 @@ type traversingVisitor struct {
 	orderDirections          []sst.OrderDirection
 	visitedLimit             bool
 	limitValues              []int
+	visitedOffset            bool
+	offsetValues             []int
 	visitedJoin              bool
 	joinEvents               []string
 	visitedBinaryExpressions int
@@ -112,6 +118,8 @@ func (v *traversingVisitor) VisitClause(s sst.ClauseNode) error {
 		v.visitedOrderBy = true
 	case "LIMIT":
 		v.visitedLimit = true
+	case "OFFSET":
+		v.visitedOffset = true
 	}
 	return nil
 }
@@ -199,6 +207,11 @@ func (v *traversingVisitor) VisitOrderItem(item sst.OrderItemNode) error {
 
 func (v *traversingVisitor) VisitLimit(limit sst.LimitNode) error {
 	v.limitValues = append(v.limitValues, limit.Value())
+	return nil
+}
+
+func (v *traversingVisitor) VisitOffset(offset sst.OffsetNode) error {
+	v.offsetValues = append(v.offsetValues, offset.Value())
 	return nil
 }
 
@@ -343,6 +356,19 @@ func TestSelectLimitTraversal(t *testing.T) {
 	assert.NoError(t, stmt.Accept(visitor))
 	assert.True(t, visitor.visitedLimit)
 	assert.Equal(t, []int{10}, visitor.limitValues)
+}
+
+func TestSelectOffsetTraversal(t *testing.T) {
+	visitor := &traversingVisitor{}
+	stmt := Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Offset(10)
+
+	assert.NoError(t, stmt.Accept(visitor))
+	assert.True(t, visitor.visitedOffset)
+	assert.Equal(t, []int{10}, visitor.offsetValues)
 }
 
 func TestSelectJoinTraversalChain(t *testing.T) {

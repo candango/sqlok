@@ -18,6 +18,7 @@ type SelectStatement struct {
 	where       *whereClause
 	orderBy     *orderByClause
 	limit       *limitClause
+	offset      *offsetClause
 	err         error
 }
 
@@ -74,6 +75,14 @@ func (s *SelectStatement) Accept(v sst.Visitor) error {
 			return err
 		}
 		if err := s.limit.Accept(v); err != nil {
+			return err
+		}
+	}
+	if s.offset != nil {
+		if err := v.VisitClause(s.offset); err != nil {
+			return err
+		}
+		if err := s.offset.Accept(v); err != nil {
 			return err
 		}
 	}
@@ -267,6 +276,21 @@ func (s *SelectStatement) Limit(value int) sst.SelectBuilder {
 	return s
 }
 
+// Offset sets the number of rows skipped by the SELECT statement.
+// Zero is valid; negative values are recorded as a construction error.
+func (s *SelectStatement) Offset(value int) sst.SelectBuilder {
+	if s.err != nil {
+		return s
+	}
+	if value < 0 {
+		s.err = errors.New("OFFSET cannot be negative")
+		return s
+	}
+
+	s.offset = newOffsetClause(value)
+	return s
+}
+
 // Source returns the primary FROM source.
 func (s *SelectStatement) Source() sst.FromSourceNode {
 	return s.source
@@ -328,6 +352,28 @@ func (l *limitClause) Value() int {
 
 func (l *limitClause) Accept(v sst.Visitor) error {
 	return v.VisitLimit(l)
+}
+
+type offsetClause struct {
+	value int
+}
+
+var _ sst.OffsetNode = (*offsetClause)(nil)
+
+func newOffsetClause(value int) *offsetClause {
+	return &offsetClause{value: value}
+}
+
+func (o *offsetClause) Declaration() string {
+	return "OFFSET"
+}
+
+func (o *offsetClause) Value() int {
+	return o.value
+}
+
+func (o *offsetClause) Accept(v sst.Visitor) error {
+	return v.VisitOffset(o)
 }
 
 // FromSource represents a SELECT source table and its next attached join.

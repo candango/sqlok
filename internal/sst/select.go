@@ -51,4 +51,7 @@ type SelectBuilder interface {
 
 	// Limit sets the maximum number of rows returned by the SELECT statement.
 	Limit(int) SelectBuilder
+
+	// Offset sets the number of rows skipped by the SELECT statement.
+	Offset(int) SelectBuilder
 }
