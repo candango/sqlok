@@ -4,9 +4,23 @@ import (
 	"testing"
 
 	"github.com/candango/sqlok/internal/sst"
+	"github.com/candango/sqlok/internal/sst/dml"
 	"github.com/candango/sqlok/internal/sst/dql"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestCompileInsert(t *testing.T) {
+	stmt := dml.Insert(
+		sst.NewTableRef("users", sst.WithTableSchema("public")),
+		sst.NewColumnRef("", "name"),
+	).Values([]sst.ExpressionNode{sst.NewBindParam("ana")})
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "INSERT INTO public.users (name) VALUES (?)", sql)
+	assert.Equal(t, []any{"ana"}, args)
+}
 
 func TestCompileSelectDistinct(t *testing.T) {
 	stmt := dql.Select(
