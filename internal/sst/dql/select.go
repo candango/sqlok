@@ -11,7 +11,7 @@ import (
 // SELECT statement. It implements sst.SelectBuilder for construction and
 // sst.SelectStatementNode for traversal and compilation.
 type SelectStatement struct {
-	columns     *sst.ExpressionList
+	columns     *sst.CommaSeparatedList[sst.ExpressionNode]
 	source      sst.FromSourceNode
 	tailSource  sst.FromSourceNode
 	pendingJoin *Join
@@ -27,7 +27,7 @@ var _ sst.SelectBuilder = (*SelectStatement)(nil)
 func Select(columns ...sst.ExpressionNode) *SelectStatement {
 	s := &SelectStatement{}
 	if len(columns) > 0 {
-		s.columns = sst.NewExpressionList(columns...)
+		s.columns = sst.NewCommaSeparatedList(columns...)
 	}
 	return s
 }
@@ -75,7 +75,7 @@ func (s *SelectStatement) Err() error {
 }
 
 // Columns returns the projected expressions in this SELECT statement.
-func (s *SelectStatement) Columns() *sst.ExpressionList {
+func (s *SelectStatement) Columns() *sst.CommaSeparatedList[sst.ExpressionNode] {
 	return s.columns
 }
 

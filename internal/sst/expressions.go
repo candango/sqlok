@@ -31,38 +31,6 @@ func expressionPrecedence(expr ExpressionNode) int {
 	return atomicExpressionPrecedence
 }
 
-// ExpressionList represents a comma-separated list of expressions.
-type ExpressionList struct {
-	items []ExpressionNode
-}
-
-var _ ListNode[ExpressionNode] = (*ExpressionList)(nil)
-
-// NewExpressionList creates an expression list.
-func NewExpressionList(items ...ExpressionNode) *ExpressionList {
-	return &ExpressionList{
-		items: append([]ExpressionNode(nil), items...),
-	}
-}
-
-// Items returns the expressions in order.
-func (l *ExpressionList) Items() []ExpressionNode {
-	return l.items
-}
-
-// Accept visits each expression and delegates separators to the visitor.
-func (l *ExpressionList) Accept(v Visitor) error {
-	for i, item := range l.items {
-		if err := v.VisitListSeparator(i); err != nil {
-			return err
-		}
-		if err := item.Accept(v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // BinaryExpressionNode represents an expression with two expression operands.
 type BinaryExpressionNode interface {
 	ExpressionNode

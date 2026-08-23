@@ -122,9 +122,9 @@ func (c *Compiler) VisitColumnRef(column sst.ColumnRefNode) error {
 }
 
 // VisitListSeparator renders a comma before every list item after the first.
-func (c *Compiler) VisitListSeparator(index int) error {
+func (c *Compiler) VisitListSeparator(index int, sep string) error {
 	if index > 0 {
-		c.parts = append(c.parts, ", ")
+		c.parts = append(c.parts, sep)
 	}
 	return nil
 }

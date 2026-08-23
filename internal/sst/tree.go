@@ -28,14 +28,6 @@ type StatementNode interface {
 	Err() error
 }
 
-// ListNode represents an ordered list of semantic-tree nodes.
-type ListNode[T Node] interface {
-	Node
-
-	// Items returns the list elements in traversal order.
-	Items() []T
-}
-
 // ColumnRefNode represents a reference to a SQL column.
 type ColumnRefNode interface {
 	Node
@@ -85,7 +77,7 @@ type Visitor interface {
 	VisitJoin(JoinNode) error
 
 	// VisitListSeparator visits the separator position before a list item.
-	VisitListSeparator(index int) error
+	VisitListSeparator(index int, sep string) error
 
 	// VisitStatement visits a SQL statement declaration.
 	VisitStatement(StatementNode) error

@@ -45,7 +45,7 @@ func (v *fakeVisitor) VisitFromSource(s sst.FromSourceNode) error {
 	return nil
 }
 
-func (v *fakeVisitor) VisitListSeparator(index int) error {
+func (v *fakeVisitor) VisitListSeparator(index int, sep string) error {
 	return nil
 }
 
@@ -126,7 +126,7 @@ func (v *traversingVisitor) VisitExpressionGroupEnd() error {
 	return nil
 }
 
-func (v *traversingVisitor) VisitListSeparator(index int) error {
+func (v *traversingVisitor) VisitListSeparator(index int, sep string) error {
 	return nil
 }
 

@@ -7,7 +7,7 @@ type SelectStatementNode interface {
 	StatementNode
 
 	// Columns returns the projected expressions in this SELECT statement.
-	Columns() *ExpressionList
+	Columns() *CommaSeparatedList[ExpressionNode]
 
 	// Source returns the primary FROM source.
 	Source() FromSourceNode
