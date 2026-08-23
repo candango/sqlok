@@ -44,7 +44,7 @@ type SelectBuilder interface {
 	Where(ExpressionNode) SelectBuilder
 
 	// OrderBy appends ORDER BY items to the SELECT statement.
-	OrderBy(...*OrderItem) SelectBuilder
+	OrderBy(...OrderItemNode) SelectBuilder
 
 	// ClearOrderBy removes all ORDER BY items from the SELECT statement.
 	ClearOrderBy() SelectBuilder

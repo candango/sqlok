@@ -139,3 +139,8 @@ func (c *Compiler) VisitTableRef(table sst.TableRefNode) error {
 	c.parts = append(c.parts, strings.Join(parts, "."))
 	return nil
 }
+
+func (c *Compiler) VisitOrderItem(item sst.OrderItemNode) error {
+	c.parts = append(c.parts, " ", string(item.Direction()))
+	return nil
+}

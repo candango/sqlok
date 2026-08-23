@@ -10,10 +10,39 @@ const (
 	DescDirection OrderDirection = "DESC"
 )
 
+// OrderItemNode represents one expression and direction in an ORDER BY list.
+type OrderItemNode interface {
+	Node
+
+	// Expression returns the expression being ordered.
+	Expression() ExpressionNode
+
+	// Direction returns the ordering direction.
+	Direction() OrderDirection
+}
+
 // OrderItem represents one expression and direction in an ORDER BY clause.
 type OrderItem struct {
 	expression ExpressionNode
 	direction  OrderDirection
+}
+
+// Accept dispatches the order item to the provided visitor.
+func (oi *OrderItem) Accept(v Visitor) error {
+	if err := oi.expression.Accept(v); err != nil {
+		return err
+	}
+	return v.VisitOrderItem(oi)
+}
+
+// Expression returns the expression being ordered.
+func (oi *OrderItem) Expression() ExpressionNode {
+	return oi.expression
+}
+
+// Direction returns the ordering direction.
+func (oi *OrderItem) Direction() OrderDirection {
+	return oi.direction
 }
 
 // OrderItemOption configures an OrderItem during construction.

@@ -16,7 +16,7 @@ type SelectStatement struct {
 	tailSource  sst.FromSourceNode
 	pendingJoin *Join
 	where       *whereClause
-	orderItems  []*sst.OrderItem
+	orderBy     *orderByClause
 	err         error
 }
 
@@ -57,6 +57,14 @@ func (s *SelectStatement) Accept(v sst.Visitor) error {
 		}
 
 		if err := s.where.Accept(v); err != nil {
+			return err
+		}
+	}
+	if s.orderBy != nil && len(s.orderBy.items.Items()) > 0 {
+		if err := v.VisitClause(s.orderBy); err != nil {
+			return err
+		}
+		if err := s.orderBy.Accept(v); err != nil {
 			return err
 		}
 	}
@@ -211,11 +219,16 @@ func (s *SelectStatement) On(condition sst.Node) sst.SelectBuilder {
 }
 
 // OrderBy appends ORDER BY items to the SELECT statement.
-func (s *SelectStatement) OrderBy(items ...*sst.OrderItem) sst.SelectBuilder {
+func (s *SelectStatement) OrderBy(items ...sst.OrderItemNode) sst.SelectBuilder {
 	if s.err != nil {
 		return s
 	}
-	s.orderItems = append(s.orderItems, items...)
+	if s.orderBy == nil {
+		s.orderBy = newOrderByClause(
+			sst.NewCommaSeparatedList[sst.OrderItemNode](),
+		)
+	}
+	s.orderBy.items.Append(items...)
 	return s
 }
 
@@ -224,7 +237,9 @@ func (s *SelectStatement) ClearOrderBy() sst.SelectBuilder {
 	if s.err != nil {
 		return s
 	}
-	s.orderItems = nil
+	if s.orderBy != nil {
+		s.orderBy.items.Clear()
+	}
 	return s
 }
 
@@ -249,6 +264,24 @@ func (w *whereClause) Declaration() string {
 
 func (w *whereClause) Accept(v sst.Visitor) error {
 	return w.condition.Accept(v)
+}
+
+type orderByClause struct {
+	items *sst.CommaSeparatedList[sst.OrderItemNode]
+}
+
+var _ sst.ClauseNode = (*orderByClause)(nil)
+
+func newOrderByClause(items *sst.CommaSeparatedList[sst.OrderItemNode]) *orderByClause {
+	return &orderByClause{items: items}
+}
+
+func (c *orderByClause) Declaration() string {
+	return "ORDER BY"
+}
+
+func (c *orderByClause) Accept(v sst.Visitor) error {
+	return c.items.Accept(v)
 }
 
 // FromSource represents a SELECT source table and its next attached join.

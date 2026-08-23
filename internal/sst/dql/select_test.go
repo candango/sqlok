@@ -57,6 +57,10 @@ func (v *fakeVisitor) VisitJoin(s sst.JoinNode) error {
 	return nil
 }
 
+func (v *fakeVisitor) VisitOrderItem(s sst.OrderItemNode) error {
+	return nil
+}
+
 type fakeExpr struct{}
 
 func (e *fakeExpr) Accept(v sst.Visitor) error {
@@ -69,6 +73,9 @@ type traversingVisitor struct {
 	visitedTableRef          bool
 	visitedFrom              bool
 	visitedWhere             bool
+	visitedOrderBy           bool
+	visitedOrderItems        int
+	orderDirections          []sst.OrderDirection
 	visitedJoin              bool
 	joinEvents               []string
 	visitedBinaryExpressions int
@@ -92,8 +99,11 @@ func (v *traversingVisitor) VisitColumnRef(s sst.ColumnRefNode) error {
 }
 
 func (v *traversingVisitor) VisitClause(s sst.ClauseNode) error {
-	if s.Declaration() == "WHERE" {
+	switch s.Declaration() {
+	case "WHERE":
 		v.visitedWhere = true
+	case "ORDER BY":
+		v.visitedOrderBy = true
 	}
 	return nil
 }
@@ -170,6 +180,12 @@ func (v *traversingVisitor) VisitJoin(j sst.JoinNode) error {
 	if next := right.Join(); next != nil {
 		return next.Accept(v)
 	}
+	return nil
+}
+
+func (v *traversingVisitor) VisitOrderItem(item sst.OrderItemNode) error {
+	v.visitedOrderItems++
+	v.orderDirections = append(v.orderDirections, item.Direction())
 	return nil
 }
 
@@ -281,6 +297,26 @@ func TestSelectNotTraversal(t *testing.T) {
 	assert.Equal(t, 1, visitor.visitedNotExpressions)
 	assert.Equal(t, 1, visitor.visitedBinaryExpressions)
 	assert.Equal(t, []any{42}, visitor.bindParams)
+}
+
+func TestSelectOrderByTraversal(t *testing.T) {
+	visitor := &traversingVisitor{}
+	stmt := Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).OrderBy(
+		sst.Asc(sst.NewColumnRef("users", "name")),
+		sst.Desc(sst.NewColumnRef("users", "id")),
+	)
+
+	assert.NoError(t, stmt.Accept(visitor))
+	assert.True(t, visitor.visitedOrderBy)
+	assert.Equal(t, 2, visitor.visitedOrderItems)
+	assert.Equal(t, []sst.OrderDirection{
+		sst.AscDirection,
+		sst.DescDirection,
+	}, visitor.orderDirections)
 }
 
 func TestSelectJoinTraversalChain(t *testing.T) {

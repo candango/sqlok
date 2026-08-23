@@ -79,6 +79,9 @@ type Visitor interface {
 	// VisitListSeparator visits the separator position before a list item.
 	VisitListSeparator(index int, sep string) error
 
+	// VisitOrderItem visits an ORDER BY item after its expression.
+	VisitOrderItem(OrderItemNode) error
+
 	// VisitStatement visits a SQL statement declaration.
 	VisitStatement(StatementNode) error
 

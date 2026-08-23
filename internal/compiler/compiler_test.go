@@ -177,6 +177,23 @@ func TestCompileSelectWithNot(t *testing.T) {
 	assert.Equal(t, []any{42, "sandy"}, args)
 }
 
+func TestCompileSelectWithOrderBy(t *testing.T) {
+	stmt := dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).OrderBy(
+		sst.Asc(sst.NewColumnRef("users", "name")),
+		sst.Desc(sst.NewColumnRef("users", "id")),
+	)
+
+	sql, args, err := Compile(stmt)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT users.id FROM users ORDER BY users.name ASC, users.id DESC", sql)
+	assert.Empty(t, args)
+}
+
 func TestCompileSelectWithFromAndJoin(t *testing.T) {
 
 	t.Run("should have from and join", func(t *testing.T) {
