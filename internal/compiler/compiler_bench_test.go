@@ -103,3 +103,42 @@ func BenchmarkASTCompileExistingStatement(b *testing.B) {
 		benchmarkSQL, benchmarkArgs, benchmarkErr = Compile(stmt)
 	}
 }
+
+// benchmarkCachedShape is a deliberately small stand-in for the future
+// CompiledStatement. The SQL is compiled once; the binder supplies current
+// values without putting them in the cached shape.
+type benchmarkCachedShape struct {
+	sql string
+}
+
+type benchmarkRuntimeValues struct {
+	id     int
+	second string
+}
+
+func benchmarkBuildCachedShape(stmt sst.StatementNode) benchmarkCachedShape {
+	sql, _, err := Compile(stmt)
+	if err != nil {
+		panic(err)
+	}
+	return benchmarkCachedShape{sql: sql}
+}
+
+func (s benchmarkCachedShape) bind(values benchmarkRuntimeValues) []any {
+	return []any{values.id, values.second}
+}
+
+func BenchmarkASTCompileCachedShape(b *testing.B) {
+	shape := benchmarkBuildCachedShape(benchmarkASTStatement())
+	values := benchmarkRuntimeValues{
+		id:     benchmarkID,
+		second: "second",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		benchmarkSQL = shape.sql
+		benchmarkArgs = shape.bind(values)
+	}
+}
