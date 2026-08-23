@@ -271,17 +271,182 @@ A public comparison helper may accept a Go value for ergonomics, but it must
 normalize that value to a concrete bind-parameter node implementing
 `BindParamNode`. The SST must not silently turn request input into inline SQL.
 
-## TODO: cache compiled statement shapes
+## Runtime compilation and statement-shape cache
 
-The typed SST/compiler path may cost more during the first construction and
-compilation than direct SQL-string assembly. That cost is acceptable when a
-statement shape can be compiled once and reused for subsequent executions.
+The typed SST/compiler path intentionally separates query construction from
+SQL rendering. That separation makes the first execution more expensive than
+a generated or handwritten query path: the application may need to resolve a
+model, construct the SST, traverse the nodes, render SQL, and collect bound
+arguments.
 
-This TODO emerged while modeling the `JOIN ... ON` clause: keeping `ON` as a
-structured or parameterized expression improves composition and safety, while
-cached compilation can optimize the repeated execution path. The cache should
-store the SQL template and parameter layout, not request-specific argument
-values. Cache identity must account for the statement shape and SQL dialect.
+That cost does not need to be paid for every execution of the same statement
+shape. The runtime can use a two-path model inspired by frameworks that parse
+and build a slow representation once, persist a generated artifact, and use a
+direct path after the artifact is available:
+
+```text
+Cold/build path:
+  public DSL or model
+    → model/reflection metadata
+    → SST construction
+    → compiler traversal
+    → compiled statement shape
+    → cache
+
+Warm/execution path:
+  statement shape lookup
+    → bind current runtime values
+    → optional database/sql prepared statement
+    → execute
+```
+
+The analogy is deliberately limited. MyFuses can generate PHP source and let
+the PHP runtime include that source on later requests. SQLok must not generate
+and execute Go source at runtime. Its cache artifact should remain declarative:
+a SQL template plus the metadata required to bind current values safely.
+
+### Compiled statement artifact
+
+The future cache boundary is a compiled statement shape, not a request result
+and not a statement containing request-specific values. A conceptual shape is:
+
+```go
+type CompiledStatement struct {
+    Version    string
+    Dialect    string
+    ShapeKey   string
+    SQL        string
+    BindLayout []Binding
+}
+```
+
+`SQL` contains placeholders. `BindLayout` maps logical values from a builder or
+model to placeholder positions. A binding may identify an expression slot, a
+model field path, or a row/column position for a multi-row INSERT. The exact
+public type remains open, but the boundary must preserve these properties:
+
+- the SQL template contains no runtime values;
+- the current call creates or supplies the `args` slice separately;
+- binding order is deterministic and matches placeholder order;
+- the artifact can be validated before execution;
+- the same shape can be reused with different values.
+
+For example, these two executions have one cacheable shape but different
+runtime data:
+
+```text
+UPDATE users SET name = ? WHERE users.id = ?
+args: ["ana", 42]
+
+UPDATE users SET name = ? WHERE users.id = ?
+args: ["bob", 7]
+```
+
+The values must never become part of the cache key or serialized artifact.
+
+### Shape identity
+
+A cache key must describe the structure that affects rendered SQL and binding
+layout. It should account for at least:
+
+- statement root: SELECT, INSERT, UPDATE, or DELETE;
+- statement topology and clause order;
+- target table and selected/assigned columns;
+- operators, joins, grouping, ordering, and row count where relevant;
+- dialect and placeholder strategy;
+- compiler artifact version;
+- model/reflection descriptor version when a model API is involved;
+- schema or migration fingerprint when schema changes can invalidate mapping.
+
+Runtime values are intentionally excluded. A query that changes only from
+`id = 42` to `id = 7` should reuse the same shape. A query that adds a JOIN,
+changes the INSERT column set, or changes the number of VALUES rows must use a
+different shape.
+
+The key should be canonical rather than derived from pointer addresses or Go
+map iteration order. Public row-map APIs therefore need deterministic column
+ordering before they reach the SST.
+
+### Development and production paths
+
+Development mode should optimize feedback:
+
+- allow cache misses to build a shape immediately;
+- invalidate shapes when source, model metadata, compiler, or dialect versions
+  change;
+- expose enough diagnostics to distinguish a cold build from a warm hit;
+- keep the cache easy to clear during AST development.
+
+Production should optimize repeat execution and predictable permissions:
+
+- build or warm the cache during deployment or an explicit warm-up step;
+- prefer a read-only cache directory at request time;
+- validate artifact version, dialect, shape key, and integrity before use;
+- treat a missing or stale artifact as an explicit operational decision rather
+  than silently executing an unvalidated artifact;
+- write replacements atomically when runtime rebuilding is explicitly enabled.
+
+An in-memory cache is the first implementation target. A persistent cache can
+follow once the shape and invalidation contracts are stable. The database may
+also maintain its own prepared-statement or query-plan cache; SQLok's cache is
+an application-side cache for AST construction, rendering, and binding
+metadata, not a replacement for the database optimizer.
+
+### Security boundaries
+
+The cache must preserve the same safety boundary as the compiler:
+
+- never interpolate runtime values into cached SQL;
+- never serialize secrets, credentials, or request payloads into artifacts;
+- validate or constrain dynamic identifiers before they enter a shape;
+- do not execute generated Go code, plugins, or arbitrary cache contents;
+- keep production artifacts owned and writable only by the deployment process;
+- avoid logging bound values merely to report cache hits or misses.
+
+Raw SQL remains an explicit trusted escape hatch. A raw expression may affect a
+shape key, but it must not turn the cache into an execution path for untrusted
+source text.
+
+### Minimal benchmark POC
+
+The current compiler benchmarks provide three useful measurements:
+
+```text
+BenchmarkASTCompileEndToEnd
+  builds a fresh AST and compiles it on every iteration;
+
+BenchmarkASTCompileExistingStatement
+  reuses an AST but still traverses and renders it on every iteration;
+
+BenchmarkASTCompileCachedShape
+  builds the SQL shape once, then reuses the SQL template and binds current
+  values on the warm path.
+```
+
+`BenchmarkASTCompileCachedShape` is intentionally a small upper-bound POC. Its
+binding layout is explicit in the benchmark rather than automatically derived
+from the SST. It demonstrates the value of avoiding repeated SQL rendering,
+but it is not the production cache contract. A real implementation must derive
+`BindLayout` from the statement tree and preserve dynamic values without
+caching them.
+
+The benchmark is not an end-to-end database benchmark. It measures application
+CPU and allocation cost before `database/sql` and network latency are involved.
+The next validation step is an apples-to-apples benchmark using the same
+statement shape and values across direct SQL, generated code, SQLok cold
+compilation, and SQLok warm execution.
+
+### Implementation phases
+
+1. Add an in-memory shape cache around the current compiler without changing
+   the public API.
+2. Introduce a real `CompiledStatement` and automatic bind-layout extraction.
+3. Cache model/reflection descriptors separately from SQL shapes.
+4. Add optional prepared-statement reuse through `database/sql`.
+5. Add persistent, versioned, read-only production artifacts and an explicit
+   warm-up command.
+6. Re-run benchmarks and keep the cache only where the measured warm-path gain
+   justifies its complexity.
 
 ## Related documents
 
