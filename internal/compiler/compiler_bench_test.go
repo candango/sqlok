@@ -122,11 +122,14 @@ func BenchmarkCompileCachedMiss(b *testing.B) {
 	}
 }
 
+// BenchmarkCompileCachedHit reuses one statement so the hit comparison does
+// not include AST construction work.
 func BenchmarkCompileCachedHit(b *testing.B) {
 	cache := NewStatementCache()
+	stmt := benchmarkASTStatement()
 	_, _, benchmarkErr = CompileCached(
 		cache,
-		benchmarkASTStatement(),
+		stmt,
 		[]any{benchmarkID, "second"},
 	)
 	if benchmarkErr != nil {
@@ -138,15 +141,16 @@ func BenchmarkCompileCachedHit(b *testing.B) {
 	for b.Loop() {
 		shape, args, err := CompileCached(
 			cache,
-			benchmarkASTStatementWithValues(benchmarkID+1, "updated"),
+			stmt,
 			[]any{benchmarkID + 1, "updated"},
 		)
 		benchmarkSQL, benchmarkArgs, benchmarkErr = shape.SQL(), args, err
 	}
 }
 
-// BenchmarkASTCompileCachedShape measures the warm path after the statement
-// shape and bind layout have already been prepared.
+// BenchmarkASTCompileCachedShape measures the current prepared-plan path after
+// the statement shape and bind layout have already been prepared. Bind currently
+// validates argument count and returns the already ordered argument slice.
 func BenchmarkASTCompileCachedShape(b *testing.B) {
 	shape, err := Prepare(
 		NewStatementCache(),

@@ -359,12 +359,19 @@ The current benchmark boundary is the prepared statement artifact:
 statement shape → CompiledStatement → Bind(current values) → Executor
 ```
 
-A directional run of the existing compiler benchmarks measured the prepared
-shape warm path at 7.012 ns/op with zero allocations, while existing-statement
-compilation measured 3651 ns/op and the ad-hoc cache hit measured 5893 ns/op.
-These values are machine- and run-dependent; the useful finding is the boundary,
-not the absolute number. The benchmark suite has no flush measurement because
-there is no flush implementation to exercise.
+A directional run after making the cache-hit comparison fair, using
+`-benchtime=2s`, measured existing-statement compilation at 3650 ns/op, the
+ad-hoc cache hit at 9759 ns/op, and the prepared-shape path at 6.741 ns/op with
+zero allocations. These values are machine- and run-dependent; the useful
+finding is the boundary, not the absolute number. The cache hit remains slower
+because it derives the shape key on every call.
+
+There is an important measurement limit: `BenchmarkASTCompileCachedShape`
+calls `CompiledStatement.Bind` with arguments already in placeholder order, and
+`Bind` currently checks only the argument count before returning the same slice.
+Its 6.741 ns/op therefore measures plan access and count validation, not a
+logical value-to-slot binding transformation. The benchmark suite has no flush
+measurement because there is no flush implementation to exercise.
 
 Decision for the current cache:
 
