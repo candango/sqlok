@@ -345,6 +345,38 @@ SQLok should also keep the Core path independent from Session. A developer who
 constructs a statement directly should be able to use the shape cache without
 adopting the ORM/session layer.
 
+## Artifact granularity decision
+
+The current implementation has one concrete reusable artifact:
+`CompiledStatement`. `Session` tracks identity and pending state, but it does
+not yet implement `Flush`, operation planning, or executor coordination. An
+end-to-end statement-versus-flush benchmark would therefore require inventing
+an API that does not exist.
+
+The current benchmark boundary is the prepared statement artifact:
+
+```text
+statement shape → CompiledStatement → Bind(current values) → Executor
+```
+
+A directional run of the existing compiler benchmarks measured the prepared
+shape warm path at 7.012 ns/op with zero allocations, while existing-statement
+compilation measured 3651 ns/op and the ad-hoc cache hit measured 5893 ns/op.
+These values are machine- and run-dependent; the useful finding is the boundary,
+not the absolute number. The benchmark suite has no flush measurement because
+there is no flush implementation to exercise.
+
+Decision for the current cache:
+
+- cache one immutable `CompiledStatement` per statement shape;
+- let a future flush compose and reuse statement artifacts;
+- do not introduce a flush-level artifact or cache key until `Session.Flush`
+  defines a real operation plan and execution boundary.
+
+This keeps eviction and invalidation focused on statement shapes for now. The
+artifact unit can be revisited when the ORM/session path has a concrete flush
+implementation and an apples-to-apples benchmark.
+
 ## Shape identity
 
 A cache key must represent the structure that affects rendered SQL and binding
