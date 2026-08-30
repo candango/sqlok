@@ -14,12 +14,25 @@ import (
 	"github.com/candango/sqlok/internal/sst/dql"
 )
 
+const (
+	benchmarkID               = 42
+	benchmarkArgumentRingSize = 256
+	benchmarkArgumentRingMask = benchmarkArgumentRingSize - 1
+)
+
 var (
-	benchmarkID   = 42
 	benchmarkSQL  string
 	benchmarkArgs []any
 	benchmarkErr  error
 )
+
+func benchmarkArgumentRing() [][]any {
+	ring := make([][]any, benchmarkArgumentRingSize)
+	for i := range ring {
+		ring[i] = []any{benchmarkID + i, "second"}
+	}
+	return ring
+}
 
 func benchmarkStringQuery() (string, []any) {
 	return "SELECT users.id FROM users INNER JOIN orders " +
@@ -64,14 +77,14 @@ func BenchmarkStringQueryAssembly(b *testing.B) {
 
 func BenchmarkFunctionQueryAssembly(b *testing.B) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		benchmarkSQL, benchmarkArgs = benchmarkFunctionQuery()
 	}
 }
 
 func BenchmarkFunctionQueryWithJoinParts(b *testing.B) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		benchmarkSQL, benchmarkArgs = benchmarkFunctionQueryWithJoinParts()
 	}
 }
@@ -149,8 +162,9 @@ func BenchmarkCompileCachedHit(b *testing.B) {
 }
 
 // BenchmarkASTCompileCachedShape measures the current prepared-plan path after
-// the statement shape and bind layout have already been prepared. Bind currently
-// validates argument count and returns the already ordered argument slice.
+// the statement shape and bind layout have already been prepared. The argument
+// buffer is populated on every iteration. Bind currently validates argument
+// count and returns the already ordered argument slice.
 func BenchmarkASTCompileCachedShape(b *testing.B) {
 	shape, err := Prepare(
 		NewStatementCache(),
@@ -160,18 +174,36 @@ func BenchmarkASTCompileCachedShape(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	args := []any{benchmarkID, "second"}
+	argumentRing := benchmarkArgumentRing()
+	iteration := 0
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
+		args := argumentRing[iteration&benchmarkArgumentRingMask]
+		iteration++
 		benchmarkArgs, benchmarkErr = shape.Bind(args)
 		benchmarkSQL = shape.SQL()
 	}
 }
 
+// BenchmarkArgumentRingLookup calibrates the cost of selecting current
+// arguments from the preallocated ring used by the warm-path benchmarks.
+func BenchmarkArgumentRingLookup(b *testing.B) {
+	argumentRing := benchmarkArgumentRing()
+	iteration := 0
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		benchmarkArgs = argumentRing[iteration&benchmarkArgumentRingMask]
+		iteration++
+	}
+}
+
 // BenchmarkPlanRegistryHit measures the explicit warm lookup path. It avoids
 // AST traversal and shape-key derivation by using an application-owned plan ID.
+// The argument buffer is populated on every iteration.
 func BenchmarkPlanRegistryHit(b *testing.B) {
 	shape, err := Prepare(
 		NewStatementCache(),
@@ -187,11 +219,14 @@ func BenchmarkPlanRegistryHit(b *testing.B) {
 	if err := registry.Put(planID, shape); err != nil {
 		b.Fatal(err)
 	}
-	args := []any{benchmarkID, "second"}
+	argumentRing := benchmarkArgumentRing()
+	iteration := 0
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
+		args := argumentRing[iteration&benchmarkArgumentRingMask]
+		iteration++
 		plan, ok := registry.Get(planID)
 		if !ok {
 			b.Fatal("prepared plan not found")

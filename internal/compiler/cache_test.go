@@ -225,6 +225,22 @@ func TestPlanRegistryRejectsInvalidIDs(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestStatementCacheGetPreservesPublishedLayout(t *testing.T) {
+	cache := NewStatementCache()
+	shape := newCompiledStatement("SELECT ?", 1)
+	assert.NoError(t, cache.Put("query", shape))
+
+	cached, ok := cache.Get("query")
+	assert.True(t, ok)
+	layout := cached.BindLayout()
+	layout[0] = Binding{position: 99, kind: SlotOffset}
+
+	cached, ok = cache.Get("query")
+	assert.True(t, ok)
+	assert.Equal(t, 0, cached.BindLayout()[0].Position())
+	assert.Equal(t, SlotBind, cached.BindLayout()[0].Kind())
+}
+
 func TestStatementCacheSupportsConcurrentReaders(t *testing.T) {
 	cache := NewStatementCache()
 	shape := newCompiledStatement("SELECT ?", 1)

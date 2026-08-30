@@ -359,18 +359,30 @@ The current benchmark boundary is the prepared statement artifact:
 statement shape → CompiledStatement → Bind(current values) → Executor
 ```
 
-A directional run after making the cache-hit comparison fair, using
-`-benchtime=2s`, measured existing-statement compilation at 3650 ns/op, the
-ad-hoc cache hit at 9759 ns/op, and the prepared-shape path at 6.741 ns/op with
-zero allocations. These values are machine- and run-dependent; the useful
-finding is the boundary, not the absolute number. The cache hit remains slower
-because it derives the shape key on every call.
+The recorded comparison uses `go test -bench ... -benchmem -benchtime=1s -count=10`
+and `benchstat`, rather than a single short run. On the current
+Ryzen 5 1600 working tree, the measured paths were:
 
-There is an important measurement limit: `BenchmarkASTCompileCachedShape`
-calls `CompiledStatement.Bind` with arguments already in placeholder order, and
-`Bind` currently checks only the argument count before returning the same slice.
-Its 6.741 ns/op therefore measures plan access and count validation, not a
-logical value-to-slot binding transformation. The benchmark suite has no flush
+| Path | Time | B/op | allocs/op |
+|---|---:|---:|---:|
+| Existing statement compile | 3.762 us ±2% | 1296 | 14 |
+| Ad-hoc `CompileCached` hit | 9.953 us ±7% | 1448 | 28 |
+| Prepared shape with argument ring | 7.089 ns ±1% | 0 | 0 |
+| `PlanRegistry` lookup with argument ring | 68.58 ns ±1% | 0 | 0 |
+| Argument ring lookup calibration | 2.6 ns | 0 | 0 |
+
+The cache-hit comparison now reuses one AST on both sides. Removing the
+redundant `StatementCache.Get` clone reduced the hit from 1496 to 1448 B/op
+and from 29 to 28 allocations; `benchstat` found no significant time change.
+The ad-hoc hit remains slower because it derives the shape key on every call.
+These values are machine- and run-dependent; the useful finding is the
+boundary, not the absolute number.
+
+There is an important measurement limit: `CompiledStatement.Bind` currently
+checks only the argument count and returns the already ordered argument slice.
+The prepared and registry figures therefore measure plan access, count
+validation, and the explicitly disclosed argument-ring transport—not a logical
+value-to-slot binding transformation. The benchmark suite has no flush
 measurement because there is no flush implementation to exercise.
 
 Decision for the current cache:
@@ -477,12 +489,20 @@ BenchmarkCompileCachedMiss
   compile and publish a shape on every cache miss;
 
 BenchmarkCompileCachedHit
-  derive equivalent current statements, reuse the cached SQL shape, and bind
-  supplied values without re-rendering SQL. This still measures shape
+  reuse one statement, derive its shape key, reuse the cached SQL shape, and
+  bind supplied values without re-rendering SQL. This still measures shape
   derivation on each call;
 
 BenchmarkASTCompileCachedShape
-  prepare one shape and reuse its real `CompiledStatement.Bind` path.
+  prepare one shape, select current arguments from a preallocated ring, and
+  reuse its `CompiledStatement.Bind` path;
+
+BenchmarkArgumentRingLookup
+  calibrate the cost of selecting current arguments from that ring;
+
+BenchmarkPlanRegistryHit
+  look up one prepared shape by application-owned `PlanID`, select current
+  arguments from the ring, and bind without shape-key derivation.
 ```
 
 The warm path is explicit:

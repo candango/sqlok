@@ -221,7 +221,7 @@ func (c *StatementCache) Get(key ShapeKey) (CompiledStatement, bool) {
 	if !ok {
 		return CompiledStatement{}, false
 	}
-	return cloneCompiledStatement(shape), true
+	return shape, true
 }
 
 // Put publishes a compiled shape under its canonical key.
