@@ -11,7 +11,7 @@ import (
 var ErrOffsetRequiresLimit = errors.New("OFFSET requires LIMIT")
 
 // SelectStatement is the concrete fluent builder and semantic root node of a
-// SELECT statement. It implements sst.SelectBuilder for construction and
+// SELECT statement. Its fluent methods build the statement and it implements
 // sst.SelectStatementNode for traversal and compilation.
 type SelectStatement struct {
 	columns     *sst.CommaSeparatedList[sst.ExpressionNode]
@@ -27,8 +27,6 @@ type SelectStatement struct {
 	offset      *offsetClause
 	err         error
 }
-
-var _ sst.SelectBuilder = (*SelectStatement)(nil)
 
 // Select creates a concrete SELECT builder with the provided projected
 // expressions.
@@ -137,7 +135,7 @@ func (s *SelectStatement) Err() error {
 }
 
 // Distinct marks the SELECT statement to remove duplicate rows.
-func (s *SelectStatement) Distinct() sst.SelectBuilder {
+func (s *SelectStatement) Distinct() *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -151,7 +149,7 @@ func (s *SelectStatement) Columns() *sst.CommaSeparatedList[sst.ExpressionNode] 
 }
 
 // From sets the primary FROM source and returns the SELECT statement.
-func (s *SelectStatement) From(table sst.TableRefNode) sst.SelectBuilder {
+func (s *SelectStatement) From(table sst.TableRefNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -166,7 +164,7 @@ func (s *SelectStatement) From(table sst.TableRefNode) sst.SelectBuilder {
 }
 
 // Join adds a source with the JOIN type.
-func (s *SelectStatement) Join(table sst.TableRefNode) sst.SelectBuilder {
+func (s *SelectStatement) Join(table sst.TableRefNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -178,7 +176,7 @@ func (s *SelectStatement) Join(table sst.TableRefNode) sst.SelectBuilder {
 }
 
 // InnerJoin adds a source with the INNER JOIN type.
-func (s *SelectStatement) InnerJoin(table sst.TableRefNode) sst.SelectBuilder {
+func (s *SelectStatement) InnerJoin(table sst.TableRefNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -190,7 +188,7 @@ func (s *SelectStatement) InnerJoin(table sst.TableRefNode) sst.SelectBuilder {
 }
 
 // CrossJoin adds a source with the CROSS JOIN type.
-func (s *SelectStatement) CrossJoin(table sst.TableRefNode) sst.SelectBuilder {
+func (s *SelectStatement) CrossJoin(table sst.TableRefNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -202,7 +200,7 @@ func (s *SelectStatement) CrossJoin(table sst.TableRefNode) sst.SelectBuilder {
 }
 
 // LeftJoin adds a source with the LEFT JOIN type.
-func (s *SelectStatement) LeftJoin(table sst.TableRefNode) sst.SelectBuilder {
+func (s *SelectStatement) LeftJoin(table sst.TableRefNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -214,7 +212,7 @@ func (s *SelectStatement) LeftJoin(table sst.TableRefNode) sst.SelectBuilder {
 }
 
 // RightJoin adds a source with the RIGHT JOIN type.
-func (s *SelectStatement) RightJoin(table sst.TableRefNode) sst.SelectBuilder {
+func (s *SelectStatement) RightJoin(table sst.TableRefNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -246,7 +244,7 @@ func (s *SelectStatement) addJoin(table sst.TableRefNode, jtype sst.JoinType) er
 }
 
 // Where adds a WHERE clause with the provided condition.
-func (s *SelectStatement) Where(condition sst.ExpressionNode) sst.SelectBuilder {
+func (s *SelectStatement) Where(condition sst.ExpressionNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -263,7 +261,7 @@ func (s *SelectStatement) Where(condition sst.ExpressionNode) sst.SelectBuilder 
 }
 
 // FullJoin adds a source with the FULL OUTER JOIN type.
-func (s *SelectStatement) FullJoin(table sst.TableRefNode) sst.SelectBuilder {
+func (s *SelectStatement) FullJoin(table sst.TableRefNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -275,7 +273,7 @@ func (s *SelectStatement) FullJoin(table sst.TableRefNode) sst.SelectBuilder {
 }
 
 // On completes the most recently created JOIN with its condition.
-func (s *SelectStatement) On(condition sst.Node) sst.SelectBuilder {
+func (s *SelectStatement) On(condition sst.Node) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -294,7 +292,7 @@ func (s *SelectStatement) On(condition sst.Node) sst.SelectBuilder {
 }
 
 // GroupBy adds expressions to the GROUP BY clause.
-func (s *SelectStatement) GroupBy(expressions ...sst.ExpressionNode) sst.SelectBuilder {
+func (s *SelectStatement) GroupBy(expressions ...sst.ExpressionNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -308,7 +306,7 @@ func (s *SelectStatement) GroupBy(expressions ...sst.ExpressionNode) sst.SelectB
 }
 
 // Having adds or combines a HAVING condition.
-func (s *SelectStatement) Having(condition sst.ExpressionNode) sst.SelectBuilder {
+func (s *SelectStatement) Having(condition sst.ExpressionNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -325,7 +323,7 @@ func (s *SelectStatement) Having(condition sst.ExpressionNode) sst.SelectBuilder
 }
 
 // OrderBy appends ORDER BY items to the SELECT statement.
-func (s *SelectStatement) OrderBy(items ...sst.OrderItemNode) sst.SelectBuilder {
+func (s *SelectStatement) OrderBy(items ...sst.OrderItemNode) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -339,7 +337,7 @@ func (s *SelectStatement) OrderBy(items ...sst.OrderItemNode) sst.SelectBuilder 
 }
 
 // ClearOrderBy removes all ORDER BY items from the SELECT statement.
-func (s *SelectStatement) ClearOrderBy() sst.SelectBuilder {
+func (s *SelectStatement) ClearOrderBy() *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -351,7 +349,7 @@ func (s *SelectStatement) ClearOrderBy() sst.SelectBuilder {
 
 // Limit sets the maximum number of rows returned by the SELECT statement.
 // Zero is valid; negative values are recorded as a construction error.
-func (s *SelectStatement) Limit(value int) sst.SelectBuilder {
+func (s *SelectStatement) Limit(value int) *SelectStatement {
 	if s.err != nil {
 		return s
 	}
@@ -366,7 +364,7 @@ func (s *SelectStatement) Limit(value int) sst.SelectBuilder {
 
 // Offset sets the number of rows skipped by the SELECT statement.
 // Zero is valid; negative values are recorded as a construction error.
-func (s *SelectStatement) Offset(value int) sst.SelectBuilder {
+func (s *SelectStatement) Offset(value int) *SelectStatement {
 	if s.err != nil {
 		return s
 	}

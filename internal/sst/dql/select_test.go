@@ -256,6 +256,27 @@ func (v *traversingVisitor) VisitOffset(offset sst.OffsetNode) error {
 	return nil
 }
 
+func TestSelectFluentMethodsRetainConcreteType(t *testing.T) {
+	stmt := Select(sst.NewLiteral(1)).
+		From(sst.NewTableRef("users")).
+		Where(sst.Eq(sst.NewColumnRef("users", "id"), sst.NewBindParam(1))).
+		Distinct().
+		GroupBy(sst.NewColumnRef("users", "id")).
+		Having(sst.Gt(sst.NewColumnRef("users", "id"), sst.NewBindParam(0))).
+		OrderBy(sst.Asc(sst.NewColumnRef("users", "id"))).
+		ClearOrderBy().
+		Limit(10).
+		Offset(0).
+		Join(sst.NewTableRef("orders")).
+		On(sst.Eq(
+			sst.NewColumnRef("users", "id"),
+			sst.NewColumnRef("orders", "user_id"),
+		))
+
+	var concrete *SelectStatement = stmt
+	assert.NotNil(t, concrete)
+}
+
 func TestSelectAcceptVisitsSelect(t *testing.T) {
 	visitor := &fakeVisitor{}
 	selectNode := Select()
