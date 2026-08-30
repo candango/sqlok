@@ -27,7 +27,8 @@ The standard library types already satisfy this contract:
 *sql.Conn → connection-scoped execution
 ```
 
-The exact exported location of `Executor` remains open. The behavior boundary
+The current core implementation lives in `internal/executor`. Its `Executor`
+contract is satisfied by standard `database/sql` handles. The behavior boundary
 is the important part: SQLok needs execution capability, not ownership of a
 particular driver.
 
@@ -51,18 +52,21 @@ application uses SQLok Core or the ORM layer.
 
 ## Core execution
 
-The Core path compiles a statement and delegates execution to an application-
-owned executor:
+The Core path compiles a statement shape once and delegates each execution to
+an application-owned executor:
 
 ```go
-sqlText, args, err := stmt.Compile()
+plan, err := compiler.CompileShape(stmt)
 if err != nil {
     return err
 }
 
-_, err = tx.ExecContext(ctx, sqlText, args...)
+_, err = executor.Exec(ctx, tx, plan, currentArgs)
 return err
 ```
+
+`executor.Exec` binds the current values through `CompiledStatement.Bind` before
+calling `ExecContext`. `executor.Query` provides the equivalent read path.
 
 The Core path owns statement structure, validation, SQL rendering, and bound
 argument ordering. The executor owns connection selection and the actual

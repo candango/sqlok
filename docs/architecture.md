@@ -152,9 +152,10 @@ sql  string
 args []any
 ```
 
-Runtime values are represented as bind parameters rather than concatenated
-into SQL text. Identifier rendering and value binding remain separate
-responsibilities.
+A resolved `Dialect` is supplied through the compiler shape context. The core
+compiler does not select or register a vendor dialect. Runtime values are
+represented as bind parameters rather than concatenated into SQL text.
+Identifier rendering and value binding remain separate responsibilities.
 
 ## Package responsibilities
 
@@ -164,7 +165,13 @@ Current package responsibilities are:
 internal/sst       SST contracts and shared concrete expression/reference nodes
 internal/sst/dql   SELECT statement roots and source nodes
 internal/compiler  SQL rendering and argument collection
+internal/dialect   Dialect contract, default QuestionMarkDialect, shared behavior
+internal/executor  Driver-agnostic execution of compiled statement plans
 ```
+
+Vendor-specific dialect implementations and transport-driver integration stay
+outside the core project. External adapters resolve a vendor dialect and pass it
+to the compiler.
 
 The current implementation keeps contracts and first concrete nodes together
 in `internal/sst`. They can be split into focused packages later if the

@@ -4,7 +4,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/candango/sqlok/internal/dialect"
 	"github.com/candango/sqlok/internal/sst"
 	"github.com/candango/sqlok/internal/sst/dql"
 	"github.com/stretchr/testify/assert"
@@ -224,10 +223,8 @@ func TestCompileCachedRejectsInvalidCacheInputs(t *testing.T) {
 func TestCompileCachedIncludesShapeContext(t *testing.T) {
 	stmt := dql.Select(sst.NewColumnRef("users", "id"))
 	cache := NewStatementCache()
-	postgresDialect, err := dialect.NewDialect(dialect.DialectPostgres)
-	assert.NoError(t, err)
-	sqliteDialect, err := dialect.NewDialect(dialect.DialectSQLite)
-	assert.NoError(t, err)
+	postgresDialect := postgresTestDialect{}
+	sqliteDialect := namedQuestionMarkTestDialect{name: "sqlite"}
 	postgres := ShapeContext{Dialect: postgresDialect, CompilerVersion: "compiler-v1"}
 	sqlite := ShapeContext{Dialect: sqliteDialect, CompilerVersion: "compiler-v1"}
 
@@ -245,10 +242,8 @@ func TestCompileCachedIncludesShapeContext(t *testing.T) {
 func TestCompileCachedDistinguishesQuestionMarkDialectIdentities(t *testing.T) {
 	stmt := dql.Select(sst.NewColumnRef("users", "id"))
 	cache := NewStatementCache()
-	mysqlDialect, err := dialect.NewDialect(dialect.DialectMySQL)
-	assert.NoError(t, err)
-	sqliteDialect, err := dialect.NewDialect(dialect.DialectSQLite)
-	assert.NoError(t, err)
+	mysqlDialect := namedQuestionMarkTestDialect{name: "mysql"}
+	sqliteDialect := namedQuestionMarkTestDialect{name: "sqlite"}
 
 	mysqlShape, _, err := CompileCachedWithContext(cache, stmt, nil, ShapeContext{
 		Dialect:         mysqlDialect,

@@ -3,7 +3,6 @@ package compiler
 import (
 	"testing"
 
-	"github.com/candango/sqlok/internal/dialect"
 	"github.com/candango/sqlok/internal/sst"
 	"github.com/candango/sqlok/internal/sst/dml"
 	"github.com/candango/sqlok/internal/sst/dql"
@@ -24,8 +23,7 @@ func TestCompileInsert(t *testing.T) {
 }
 
 func TestCompileWithContextUsesUnifiedPostgresBindPositions(t *testing.T) {
-	postgresDialect, err := dialect.NewDialect(dialect.DialectPostgres)
-	assert.NoError(t, err)
+	postgresDialect := postgresTestDialect{}
 
 	stmt := dql.Select(
 		sst.NewColumnRef("users", "id"),

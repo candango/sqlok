@@ -573,3 +573,43 @@ The current rejection is intentionally a builder-level portable policy, not a
 permanent PostgreSQL restriction. PostgreSQL may later relax `OFFSET` without
 `LIMIT` through dialect configuration; the current API shape permits that
 change without changing the fluent construction methods.
+
+## GORM dialect and driver boundary
+
+GORM keeps database-specific behavior out of its core module. The
+`gorm.io/gorm` package defines the `Dialector` contract, while separate driver
+modules implement each vendor integration:
+
+```text
+gorm.io/gorm             → core and Dialector contract
+gorm.io/driver/postgres  → PostgreSQL Dialector, pgx by default
+gorm.io/driver/mysql     → MySQL Dialector, go-sql-driver/mysql
+gorm.io/driver/sqlite    → SQLite Dialector, mattn/go-sqlite3
+```
+
+The vendor transport driver is pulled transitively when the corresponding GORM
+driver module is imported. GORM core does not embed concrete PostgreSQL,
+MySQL, or SQLite dialect implementations. PostgreSQL can also be connected
+through an existing `database/sql` handle or native pgx configuration,
+depending on the adapter chosen by the application.
+
+Sources:
+
+- https://github.com/go-gorm/gorm/blob/master/interfaces.go
+- https://gorm.io/docs/connecting_to_the_database.html
+- https://github.com/go-gorm/postgres
+- https://github.com/go-gorm/mysql
+- https://github.com/go-gorm/sqlite
+
+### SQLok consequence
+
+SQLok follows the same core boundary. `internal/dialect` keeps only:
+
+- the `Dialect` contract;
+- the generic/default `QuestionMarkDialect`;
+- shared rendering behavior.
+
+Vendor-specific PostgreSQL, MySQL, and SQLite dialect implementations do not
+belong in this core project. Dedicated external adapters or driver modules
+resolve the vendor dialect and provide it to the compiler. The executor owns
+transport integration; the compiler must not import or register vendor drivers.

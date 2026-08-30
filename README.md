@@ -99,6 +99,14 @@ schema loader is currently internal and uses `database/sql`.
 - **`internal/sst/`** - SQL Semantic Tree contracts and concrete nodes
   - Statements, clauses, expressions, references, and visitor traversal
 
+- **`internal/compiler/`** - Dialect-aware SQL rendering and statement-shape
+  compilation
+
+- **`internal/dialect/`** - Core Dialect contract and default question-mark
+  rendering; vendor adapters remain external
+
+- **`internal/executor/`** - Driver-agnostic execution of compiled plans
+
 - **`session.go`** - Public session and identity-map foundation
 
 - **`schema/`** - Schema definitions
