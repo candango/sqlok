@@ -182,6 +182,49 @@ func TestCompiledStatementBindLayoutCannotBeMutatedThroughAccessor(t *testing.T)
 	assert.Equal(t, 0, shape.BindLayout()[0].Position())
 }
 
+func TestPlanRegistryReusesPreparedPlanByID(t *testing.T) {
+	plan, err := Prepare(
+		NewStatementCache(),
+		dql.Select(sst.NewBindParam(42)),
+		DefaultShapeContext(),
+	)
+	assert.NoError(t, err)
+
+	registry := NewPlanRegistry()
+	assert.NoError(t, registry.Put("user-by-id", plan))
+
+	cached, ok := registry.Get("user-by-id")
+	assert.True(t, ok)
+	assert.Equal(t, plan.ShapeKey(), cached.ShapeKey())
+	assert.Equal(t, "SELECT ?", cached.SQL())
+
+	args, err := cached.Bind([]any{7})
+	assert.NoError(t, err)
+	assert.Equal(t, []any{7}, args)
+	assert.Equal(t, 1, registry.Len())
+}
+
+func TestPlanRegistrySupportsZeroValue(t *testing.T) {
+	var registry PlanRegistry
+	plan := newCompiledStatement("SELECT 1", 0)
+
+	assert.NoError(t, registry.Put("constant", plan))
+	cached, ok := registry.Get("constant")
+
+	assert.True(t, ok)
+	assert.Equal(t, plan.SQL(), cached.SQL())
+}
+
+func TestPlanRegistryRejectsInvalidIDs(t *testing.T) {
+	registry := NewPlanRegistry()
+	plan := newCompiledStatement("SELECT 1", 0)
+
+	assert.ErrorIs(t, registry.Put("", plan), ErrEmptyPlanID)
+	assert.ErrorIs(t, (*PlanRegistry)(nil).Put("constant", plan), ErrNilPlanRegistry)
+	_, ok := registry.Get(PlanID(" "))
+	assert.False(t, ok)
+}
+
 func TestStatementCacheSupportsConcurrentReaders(t *testing.T) {
 	cache := NewStatementCache()
 	shape := newCompiledStatement("SELECT ?", 1)

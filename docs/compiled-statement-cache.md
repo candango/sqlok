@@ -501,15 +501,35 @@ if err != nil {
 execute(shape.SQL(), args)
 ```
 
-For a registry-backed plan, the application stores this shape under an
-external `PlanID` after the first-use compile. A cache is useful when multiple
-components share those plans; it must not be created and discarded inside the
-same prepare call.
+For a registry-backed plan, `compiler.PlanRegistry` stores the shape under an
+application-owned external `PlanID` after the first-use compile:
+
+```go
+shape, err := compiler.Prepare(cache, stmt, context)
+if err != nil {
+    return err
+}
+registry := compiler.NewPlanRegistry()
+if err := registry.Put("users-by-id", shape); err != nil {
+    return err
+}
+
+shape, ok := registry.Get("users-by-id")
+if !ok {
+    return errors.New("prepared plan not found")
+}
+return executor.Exec(ctx, target, shape, currentArgs)
+```
+
+The registry lookup does not derive a shape key or traverse a statement. It is
+an explicit warm-path index, not a replacement for the canonical
+`StatementCache`; both can be used together during cold preparation.
 
 `CompileCached` remains a convenience for callers that provide a statement on
-every call. It must derive the shape key each time to prevent collisions. Code
-that already owns a stable statement plan should retain the prepared
-`CompiledStatement` and use `Bind` directly; that is the actual warm path.
+every call. It must derive the shape key each time to prevent collisions and
+makes no warm-path performance promise. Code that already owns a stable
+statement plan should retain the prepared `CompiledStatement` or publish it in
+`PlanRegistry` and reuse it directly.
 
 The benchmark must preserve dynamic values. The warm path may reuse the SQL
 template, but it must create or populate current arguments for each iteration;

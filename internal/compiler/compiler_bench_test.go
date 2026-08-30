@@ -169,3 +169,34 @@ func BenchmarkASTCompileCachedShape(b *testing.B) {
 		benchmarkSQL = shape.SQL()
 	}
 }
+
+// BenchmarkPlanRegistryHit measures the explicit warm lookup path. It avoids
+// AST traversal and shape-key derivation by using an application-owned plan ID.
+func BenchmarkPlanRegistryHit(b *testing.B) {
+	shape, err := Prepare(
+		NewStatementCache(),
+		benchmarkASTStatement(),
+		DefaultShapeContext(),
+	)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	registry := NewPlanRegistry()
+	const planID PlanID = "users-by-id"
+	if err := registry.Put(planID, shape); err != nil {
+		b.Fatal(err)
+	}
+	args := []any{benchmarkID, "second"}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		plan, ok := registry.Get(planID)
+		if !ok {
+			b.Fatal("prepared plan not found")
+		}
+		benchmarkArgs, benchmarkErr = plan.Bind(args)
+		benchmarkSQL = plan.SQL()
+	}
+}

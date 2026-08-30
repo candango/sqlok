@@ -19,6 +19,12 @@ var (
 	// ErrEmptyShapeKey reports a cache operation without a canonical shape key.
 	ErrEmptyShapeKey = errors.New("statement shape key cannot be empty")
 
+	// ErrNilPlanRegistry reports an operation through a nil plan registry.
+	ErrNilPlanRegistry = errors.New("plan registry cannot be nil")
+
+	// ErrEmptyPlanID reports a registry operation without an external plan ID.
+	ErrEmptyPlanID = errors.New("plan ID cannot be empty")
+
 	// ErrInvalidShapeContext reports incomplete dialect/compiler identity.
 	ErrInvalidShapeContext = errors.New("statement shape context is incomplete")
 
@@ -135,6 +141,65 @@ func (s CompiledStatement) Bind(args []any) ([]any, error) {
 type StatementCache struct {
 	mu      sync.RWMutex
 	entries map[ShapeKey]CompiledStatement
+}
+
+// PlanID identifies a prepared plan through an application-owned stable name.
+type PlanID string
+
+// PlanRegistry stores immutable prepared plans by external application ID.
+// Unlike StatementCache, it does not derive a shape key during lookup.
+type PlanRegistry struct {
+	mu    sync.RWMutex
+	plans map[PlanID]CompiledStatement
+}
+
+// NewPlanRegistry creates an empty concurrent prepared-plan registry.
+func NewPlanRegistry() *PlanRegistry {
+	return &PlanRegistry{
+		plans: make(map[PlanID]CompiledStatement),
+	}
+}
+
+// Put publishes a prepared plan under an application-owned stable ID.
+func (r *PlanRegistry) Put(id PlanID, plan CompiledStatement) error {
+	if r == nil {
+		return ErrNilPlanRegistry
+	}
+	if strings.TrimSpace(string(id)) == "" {
+		return ErrEmptyPlanID
+	}
+
+	r.mu.Lock()
+	if r.plans == nil {
+		r.plans = make(map[PlanID]CompiledStatement)
+	}
+	r.plans[id] = cloneCompiledStatement(plan)
+	r.mu.Unlock()
+	return nil
+}
+
+// Get returns a prepared plan without deriving or traversing a statement.
+func (r *PlanRegistry) Get(id PlanID) (CompiledStatement, bool) {
+	if r == nil || strings.TrimSpace(string(id)) == "" {
+		return CompiledStatement{}, false
+	}
+
+	r.mu.RLock()
+	plan, ok := r.plans[id]
+	r.mu.RUnlock()
+	return plan, ok
+}
+
+// Len returns the number of published prepared plans.
+func (r *PlanRegistry) Len() int {
+	if r == nil {
+		return 0
+	}
+
+	r.mu.RLock()
+	length := len(r.plans)
+	r.mu.RUnlock()
+	return length
 }
 
 // NewStatementCache creates an empty concurrent statement-shape cache.
