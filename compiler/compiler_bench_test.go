@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/candango/sqlok/internal/sst"
-	"github.com/candango/sqlok/internal/sst/dql"
+	"github.com/candango/sqlok/sst"
+	"github.com/candango/sqlok/sst/dql"
 )
 
 const (
@@ -169,7 +169,7 @@ func BenchmarkASTCompileCachedShape(b *testing.B) {
 	shape, err := Prepare(
 		NewStatementCache(),
 		benchmarkASTStatement(),
-		DefaultShapeContext(),
+		defaultDialect,
 	)
 	if err != nil {
 		b.Fatal(err)
@@ -208,7 +208,7 @@ func BenchmarkPlanRegistryHit(b *testing.B) {
 	shape, err := Prepare(
 		NewStatementCache(),
 		benchmarkASTStatement(),
-		DefaultShapeContext(),
+		defaultDialect,
 	)
 	if err != nil {
 		b.Fatal(err)

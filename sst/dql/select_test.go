@@ -3,7 +3,7 @@ package dql
 import (
 	"testing"
 
-	"github.com/candango/sqlok/internal/sst"
+	"github.com/candango/sqlok/sst"
 	"github.com/stretchr/testify/assert"
 )
 

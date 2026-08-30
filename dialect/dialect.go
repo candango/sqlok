@@ -1,3 +1,4 @@
+// Package dialect defines the rendering contract supplied to the SQL compiler.
 package dialect
 
 // DialectName identifies a SQL rendering dialect.

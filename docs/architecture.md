@@ -23,7 +23,7 @@ step.
 
 ## SQL Semantic Tree (SST)
 
-`internal/sst` is the SQL Semantic Tree: a semantic intermediate representation
+`sst` is the SQL Semantic Tree: a semantic intermediate representation
 for SQL query construction and compilation. It is not a parser AST focused only
 on grammatical shape. SST nodes carry SQL-domain meaning and behavior through
 contracts such as `StatementNode`, `ClauseNode`, `ExpressionNode`,
@@ -103,7 +103,7 @@ an error returned by the SST constructors.
 
 ## SST contracts
 
-The base contracts live in `internal/sst`:
+The base contracts live in `sst`:
 
 - `Node` defines visitor dispatch through `Accept`.
 - `DeclarationNode` is the shared contract for nodes that expose
@@ -128,7 +128,7 @@ serve multiple concrete consumers.
 
 ## Compiler boundary
 
-`internal/compiler` implements the visitor and owns rendering:
+`compiler` implements the visitor and owns rendering:
 
 ```text
 VisitStatement      → statement declaration
@@ -142,8 +142,8 @@ VisitListSeparator  → comma-separated list formatting
 ```
 
 Composite SST nodes own structural traversal through `Accept`. The compiler
-renders the current node; `VisitExpression` recognizes `BindParamNode`,
-collects its runtime value, and appends its expression representation.
+renders the current node; `VisitBindParam` handles runtime arguments while
+`VisitExpression` renders output-only expression text.
 
 The compiler returns:
 
@@ -152,9 +152,10 @@ sql  string
 args []any
 ```
 
-A resolved `Dialect` is supplied through the compiler shape context. The core
-compiler does not select or register a vendor dialect. Runtime values are
-represented as bind parameters rather than concatenated into SQL text.
+Public compiler entry points accept a resolved `Dialect`; the internal shape
+context also carries compiler artifact identity without exposing it to adapters.
+The core compiler does not select or register a vendor dialect. Runtime values
+are represented as bind parameters rather than concatenated into SQL text.
 Identifier rendering and value binding remain separate responsibilities.
 
 ## Package responsibilities
@@ -162,20 +163,20 @@ Identifier rendering and value binding remain separate responsibilities.
 Current package responsibilities are:
 
 ```text
-internal/sst       SST contracts and shared concrete expression/reference nodes
-internal/sst/dql   SELECT statement roots and source nodes
-internal/compiler  SQL rendering and argument collection
-internal/dialect   Dialect contract, default QuestionMarkDialect, shared behavior
-internal/executor  Driver-agnostic execution of compiled statement plans
+sst                SST contracts and shared concrete expression/reference nodes
+sst/dql            SELECT statement roots and source nodes
+compiler           SQL rendering and argument collection
+dialect            Dialect contract, default QuestionMarkDialect, shared behavior
+executor           Driver-agnostic execution of compiled statement plans
 ```
 
 Vendor-specific dialect implementations and transport-driver integration stay
 outside the core project. External adapters resolve a vendor dialect and pass it
-to the compiler.
+to public compiler entry points.
 
 The current implementation keeps contracts and first concrete nodes together
-in `internal/sst`. They can be split into focused packages later if the
-boundary becomes stable and package-cycle pressure justifies it.
+in `sst`. They can be split into focused packages later if the boundary becomes
+stable and package-cycle pressure justifies it.
 
 ## Join naming and rendering
 

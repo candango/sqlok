@@ -1,10 +1,11 @@
+// Package dml defines INSERT, UPDATE, and DELETE statement roots.
 package dml
 
 import (
 	"errors"
 	"fmt"
 
-	"github.com/candango/sqlok/internal/sst"
+	"github.com/candango/sqlok/sst"
 )
 
 // InsertStatement is the concrete fluent builder and semantic root node of an

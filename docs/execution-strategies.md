@@ -27,8 +27,8 @@ The standard library types already satisfy this contract:
 *sql.Conn → connection-scoped execution
 ```
 
-The current core implementation lives in `internal/executor`. Its `Executor`
-contract is satisfied by standard `database/sql` handles. The behavior boundary
+The current core implementation lives in `executor`. Its `Executor` contract
+is satisfied by standard `database/sql` handles. The behavior boundary
 is the important part: SQLok needs execution capability, not ownership of a
 particular driver.
 

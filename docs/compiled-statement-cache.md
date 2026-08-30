@@ -526,7 +526,7 @@ Run the current compiler benchmarks with a time-based sample and repetitions:
 ```bash
 go test -run '^$' \
   -bench 'Benchmark(ASTCompileExistingStatement|CompileCachedHit|ArgumentRingLookup|ASTCompileCachedShape|PlanRegistryHit)$' \
-  -benchmem -benchtime=1s -count=10 ./internal/compiler
+  -benchmem -benchtime=1s -count=10 ./compiler
 ```
 
 The flags mean:
@@ -553,7 +553,7 @@ cleanup() {
 trap cleanup EXIT
 
 pattern='Benchmark(ASTCompileExistingStatement|CompileCachedHit|ArgumentRingLookup|ASTCompileCachedShape|PlanRegistryHit)$'
-go test -run '^$' -bench "$pattern" -benchmem -benchtime=1s -count=10 ./internal/compiler > "$after"
+go test -run '^$' -bench "$pattern" -benchmem -benchtime=1s -count=10 ./compiler > "$after"
 git worktree add --detach "$worktree" <baseline-commit>
 (
   cd "$worktree"
@@ -563,8 +563,10 @@ benchstat "$before" "$after"
 ```
 
 Replace `<baseline-commit>` with the commit being compared, such as
-`b7f03d5`. The command creates no persistent worktree after the `trap`
-cleanup. Do not compare a single short run with a repeated time-based run.
+`b7f03d5`. That baseline predates the public package move, so its benchmark
+package is `./internal/compiler`; use `./compiler` in both commands for a
+baseline after that move. The command creates no persistent worktree after the
+`trap` cleanup. Do not compare a single short run with a repeated time-based run.
 Record the `benchstat` result and its methodology together; isolated figures
 are useful for local iteration but are not reliable findings.
 
@@ -597,7 +599,7 @@ For a registry-backed plan, `compiler.PlanRegistry` stores the shape under an
 application-owned external `PlanID` after the first-use compile:
 
 ```go
-shape, err := compiler.Prepare(cache, stmt, context)
+shape, err := compiler.Prepare(cache, stmt, renderingDialect)
 if err != nil {
     return err
 }

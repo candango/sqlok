@@ -4,8 +4,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/candango/sqlok/internal/sst"
-	"github.com/candango/sqlok/internal/sst/dql"
+	"github.com/candango/sqlok/sst"
+	"github.com/candango/sqlok/sst/dql"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -186,7 +186,7 @@ func TestPlanRegistryReusesPreparedPlanByID(t *testing.T) {
 	plan, err := Prepare(
 		NewStatementCache(),
 		dql.Select(sst.NewBindParam(42)),
-		DefaultShapeContext(),
+		defaultDialect,
 	)
 	assert.NoError(t, err)
 
@@ -275,21 +275,18 @@ func TestCompileCachedRejectsInvalidCacheInputs(t *testing.T) {
 	_, _, err := CompileCached(nil, stmt, nil)
 	assert.ErrorIs(t, err, ErrNilStatementCache)
 
-	_, _, err = CompileCachedWithContext(NewStatementCache(), stmt, nil, ShapeContext{})
-	assert.ErrorIs(t, err, ErrInvalidShapeContext)
+	_, _, err = CompileCachedWithDialect(NewStatementCache(), stmt, nil, nil)
+	assert.ErrorIs(t, err, ErrInvalidDialect)
 }
 
-func TestCompileCachedIncludesShapeContext(t *testing.T) {
+func TestCompileCachedIncludesDialectIdentity(t *testing.T) {
 	stmt := dql.Select(sst.NewColumnRef("users", "id"))
 	cache := NewStatementCache()
 	postgresDialect := postgresTestDialect{}
 	sqliteDialect := namedQuestionMarkTestDialect{name: "sqlite"}
-	postgres := ShapeContext{Dialect: postgresDialect, CompilerVersion: "compiler-v1"}
-	sqlite := ShapeContext{Dialect: sqliteDialect, CompilerVersion: "compiler-v1"}
-
-	postgresShape, _, err := CompileCachedWithContext(cache, stmt, nil, postgres)
+	postgresShape, _, err := CompileCachedWithDialect(cache, stmt, nil, postgresDialect)
 	assert.NoError(t, err)
-	sqliteShape, _, err := CompileCachedWithContext(cache, stmt, nil, sqlite)
+	sqliteShape, _, err := CompileCachedWithDialect(cache, stmt, nil, sqliteDialect)
 	assert.NoError(t, err)
 
 	assert.NotEqual(t, postgresShape.ShapeKey(), sqliteShape.ShapeKey())
@@ -304,15 +301,9 @@ func TestCompileCachedDistinguishesQuestionMarkDialectIdentities(t *testing.T) {
 	mysqlDialect := namedQuestionMarkTestDialect{name: "mysql"}
 	sqliteDialect := namedQuestionMarkTestDialect{name: "sqlite"}
 
-	mysqlShape, _, err := CompileCachedWithContext(cache, stmt, nil, ShapeContext{
-		Dialect:         mysqlDialect,
-		CompilerVersion: "compiler-v1",
-	})
+	mysqlShape, _, err := CompileCachedWithDialect(cache, stmt, nil, mysqlDialect)
 	assert.NoError(t, err)
-	sqliteShape, _, err := CompileCachedWithContext(cache, stmt, nil, ShapeContext{
-		Dialect:         sqliteDialect,
-		CompilerVersion: "compiler-v1",
-	})
+	sqliteShape, _, err := CompileCachedWithDialect(cache, stmt, nil, sqliteDialect)
 	assert.NoError(t, err)
 
 	assert.Equal(t, mysqlShape.SQL(), sqliteShape.SQL())
@@ -321,13 +312,12 @@ func TestCompileCachedDistinguishesQuestionMarkDialectIdentities(t *testing.T) {
 }
 
 func TestDeriveShapeKeyIgnoresBindValues(t *testing.T) {
-	context := DefaultShapeContext()
 	first := dql.Select(sst.NewBindParam(1))
 	second := dql.Select(sst.NewBindParam(2))
 
-	firstKey, err := DeriveShapeKey(first, context)
+	firstKey, err := DeriveShapeKey(first, defaultDialect)
 	assert.NoError(t, err)
-	secondKey, err := DeriveShapeKey(second, context)
+	secondKey, err := DeriveShapeKey(second, defaultDialect)
 	assert.NoError(t, err)
 
 	assert.Equal(t, firstKey, secondKey)

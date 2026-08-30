@@ -8,12 +8,27 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/candango/sqlok/internal/sst"
+	"github.com/candango/sqlok/dialect"
+	"github.com/candango/sqlok/sst"
 )
 
-// DeriveShapeKey creates a canonical key from statement structure and
-// rendering context. Runtime bind values are intentionally excluded.
-func DeriveShapeKey(stmt sst.StatementNode, context ShapeContext) (ShapeKey, error) {
+// DeriveShapeKey creates a canonical key from statement structure and the
+// supplied dialect. Runtime bind values are intentionally excluded.
+func DeriveShapeKey(
+	stmt sst.StatementNode,
+	renderingDialect dialect.Dialect,
+) (ShapeKey, error) {
+	context, err := newShapeContext(renderingDialect)
+	if err != nil {
+		return "", err
+	}
+	return deriveShapeKeyWithContext(stmt, context)
+}
+
+func deriveShapeKeyWithContext(
+	stmt sst.StatementNode,
+	context shapeContext,
+) (ShapeKey, error) {
 	if stmt == nil {
 		return "", errors.New("statement cannot be nil")
 	}
@@ -25,8 +40,8 @@ func DeriveShapeKey(stmt sst.StatementNode, context ShapeContext) (ShapeKey, err
 	}
 
 	fingerprint := &shapeFingerprint{}
-	fingerprint.token("dialect", string(context.Dialect.Name()))
-	fingerprint.token("compiler", context.CompilerVersion)
+	fingerprint.token("dialect", string(context.dialect.Name()))
+	fingerprint.token("compiler", context.compilerVersion)
 	if err := stmt.Accept(fingerprint); err != nil {
 		return "", err
 	}

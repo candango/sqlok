@@ -3,7 +3,7 @@ package dml
 import (
 	"errors"
 
-	"github.com/candango/sqlok/internal/sst"
+	"github.com/candango/sqlok/sst"
 )
 
 // DeleteStatement is the concrete fluent builder and semantic root node of a

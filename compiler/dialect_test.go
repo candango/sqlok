@@ -3,7 +3,7 @@ package compiler
 import (
 	"strconv"
 
-	"github.com/candango/sqlok/internal/dialect"
+	"github.com/candango/sqlok/dialect"
 )
 
 type namedQuestionMarkTestDialect struct {

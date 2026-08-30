@@ -3,8 +3,8 @@ package dml
 import (
 	"testing"
 
-	"github.com/candango/sqlok/internal/compiler"
-	"github.com/candango/sqlok/internal/sst"
+	"github.com/candango/sqlok/compiler"
+	"github.com/candango/sqlok/sst"
 	"github.com/stretchr/testify/assert"
 )
 

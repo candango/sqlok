@@ -1,3 +1,4 @@
+// Package sst defines the SQL semantic-tree contracts and shared nodes.
 package sst
 
 // Node represents any node in the SQL semantic tree.

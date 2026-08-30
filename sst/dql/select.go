@@ -1,10 +1,11 @@
+// Package dql defines SELECT statement roots and source nodes.
 package dql
 
 import (
 	"errors"
 	"fmt"
 
-	"github.com/candango/sqlok/internal/sst"
+	"github.com/candango/sqlok/sst"
 )
 
 // ErrOffsetRequiresLimit reports a structurally invalid offset-only SELECT.

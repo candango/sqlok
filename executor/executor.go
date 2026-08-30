@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/candango/sqlok/internal/compiler"
+	"github.com/candango/sqlok/compiler"
 )
 
 // Executor is the database operation contract implemented by database/sql

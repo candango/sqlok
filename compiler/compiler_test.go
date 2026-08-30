@@ -3,9 +3,9 @@ package compiler
 import (
 	"testing"
 
-	"github.com/candango/sqlok/internal/sst"
-	"github.com/candango/sqlok/internal/sst/dml"
-	"github.com/candango/sqlok/internal/sst/dql"
+	"github.com/candango/sqlok/sst"
+	"github.com/candango/sqlok/sst/dml"
+	"github.com/candango/sqlok/sst/dql"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -22,7 +22,7 @@ func TestCompileInsert(t *testing.T) {
 	assert.Equal(t, []any{"ana"}, args)
 }
 
-func TestCompileWithContextUsesUnifiedPostgresBindPositions(t *testing.T) {
+func TestCompileWithDialectUsesUnifiedPostgresBindPositions(t *testing.T) {
 	postgresDialect := postgresTestDialect{}
 
 	stmt := dql.Select(
@@ -34,10 +34,7 @@ func TestCompileWithContextUsesUnifiedPostgresBindPositions(t *testing.T) {
 	).Limit(10).
 		Offset(20)
 
-	sql, args, err := CompileWithContext(stmt, ShapeContext{
-		Dialect:         postgresDialect,
-		CompilerVersion: "compiler-v1",
-	})
+	sql, args, err := CompileWithDialect(stmt, postgresDialect)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "SELECT users.id FROM users WHERE users.id = $1 LIMIT $2 OFFSET $3", sql)

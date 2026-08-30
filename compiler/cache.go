@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/candango/sqlok/internal/dialect"
-	"github.com/candango/sqlok/internal/sst"
+	"github.com/candango/sqlok/dialect"
+	"github.com/candango/sqlok/sst"
 )
 
 const defaultCompilerVersion = "compiler-v1"
@@ -25,8 +25,8 @@ var (
 	// ErrEmptyPlanID reports a registry operation without an external plan ID.
 	ErrEmptyPlanID = errors.New("plan ID cannot be empty")
 
-	// ErrInvalidShapeContext reports incomplete dialect/compiler identity.
-	ErrInvalidShapeContext = errors.New("statement shape context is incomplete")
+	// ErrInvalidDialect reports a missing or unnamed rendering dialect.
+	ErrInvalidDialect = errors.New("statement dialect is invalid")
 
 	// ErrUnboundParameterSlot reports a value-compilation attempt for a
 	// shape-only parameter slot.
@@ -39,27 +39,37 @@ var (
 // be included in the key.
 type ShapeKey string
 
-// ShapeContext identifies the rendering inputs that affect a statement shape.
-type ShapeContext struct {
-	Dialect         dialect.Dialect
-	CompilerVersion string
+// shapeContext stores the internal inputs that affect a statement shape.
+type shapeContext struct {
+	dialect         dialect.Dialect
+	compilerVersion string
 }
 
 var defaultDialect = dialect.NewDefaultDialect()
 
-// DefaultShapeContext returns the current default compiler identity.
-func DefaultShapeContext() ShapeContext {
-	return ShapeContext{
-		Dialect:         defaultDialect,
-		CompilerVersion: defaultCompilerVersion,
+func defaultShapeContext() shapeContext {
+	return shapeContext{
+		dialect:         defaultDialect,
+		compilerVersion: defaultCompilerVersion,
 	}
 }
 
-func (c ShapeContext) validate() error {
-	if c.Dialect == nil ||
-		strings.TrimSpace(string(c.Dialect.Name())) == "" ||
-		strings.TrimSpace(c.CompilerVersion) == "" {
-		return ErrInvalidShapeContext
+func newShapeContext(renderingDialect dialect.Dialect) (shapeContext, error) {
+	context := shapeContext{
+		dialect:         renderingDialect,
+		compilerVersion: defaultCompilerVersion,
+	}
+	if err := context.validate(); err != nil {
+		return shapeContext{}, err
+	}
+	return context, nil
+}
+
+func (c shapeContext) validate() error {
+	if c.dialect == nil ||
+		strings.TrimSpace(string(c.dialect.Name())) == "" ||
+		strings.TrimSpace(c.compilerVersion) == "" {
+		return ErrInvalidDialect
 	}
 	return nil
 }
@@ -279,21 +289,29 @@ func (c *StatementCache) Len() int {
 }
 
 // CompileShape compiles a statement into an immutable shape using the default
-// shape context without retaining its current runtime values.
+// dialect without retaining its current runtime values.
 func CompileShape(stmt sst.StatementNode) (CompiledStatement, error) {
-	return CompileShapeWithContext(stmt, DefaultShapeContext())
+	return compileShapeWithContext(stmt, defaultShapeContext())
 }
 
-// CompileShapeWithContext compiles a statement using explicit rendering
-// identity without retaining its current runtime values.
-func CompileShapeWithContext(
+// CompileShapeWithDialect compiles a statement using the supplied dialect
+// without retaining its current runtime values.
+func CompileShapeWithDialect(
 	stmt sst.StatementNode,
-	context ShapeContext,
+	renderingDialect dialect.Dialect,
 ) (CompiledStatement, error) {
-	if err := context.validate(); err != nil {
+	context, err := newShapeContext(renderingDialect)
+	if err != nil {
 		return CompiledStatement{}, err
 	}
-	key, err := DeriveShapeKey(stmt, context)
+	return compileShapeWithContext(stmt, context)
+}
+
+func compileShapeWithContext(
+	stmt sst.StatementNode,
+	context shapeContext,
+) (CompiledStatement, error) {
+	key, err := deriveShapeKeyWithContext(stmt, context)
 	if err != nil {
 		return CompiledStatement{}, err
 	}
@@ -306,15 +324,70 @@ func CompileShapeWithContext(
 func Prepare(
 	cache *StatementCache,
 	stmt sst.StatementNode,
-	context ShapeContext,
+	renderingDialect dialect.Dialect,
 ) (CompiledStatement, error) {
 	if cache == nil {
 		return CompiledStatement{}, ErrNilStatementCache
 	}
-	if err := context.validate(); err != nil {
+	context, err := newShapeContext(renderingDialect)
+	if err != nil {
 		return CompiledStatement{}, err
 	}
-	key, err := DeriveShapeKey(stmt, context)
+	return prepareWithContext(cache, stmt, context)
+}
+
+// CompileCached returns a cached SQL shape and the supplied runtime values
+// using the default shape context. The shape key is derived from the statement.
+func CompileCached(
+	cache *StatementCache,
+	stmt sst.StatementNode,
+	args []any,
+) (CompiledStatement, []any, error) {
+	return compileCachedWithContext(cache, stmt, args, defaultShapeContext())
+}
+
+// CompileCachedWithDialect returns a cached SQL shape and supplied runtime
+// values using the supplied dialect. The shape key is derived from canonical
+// statement structure and the internal compiler context.
+func CompileCachedWithDialect(
+	cache *StatementCache,
+	stmt sst.StatementNode,
+	args []any,
+	renderingDialect dialect.Dialect,
+) (CompiledStatement, []any, error) {
+	context, err := newShapeContext(renderingDialect)
+	if err != nil {
+		return CompiledStatement{}, nil, err
+	}
+	return compileCachedWithContext(cache, stmt, args, context)
+}
+
+func compileCachedWithContext(
+	cache *StatementCache,
+	stmt sst.StatementNode,
+	args []any,
+	context shapeContext,
+) (CompiledStatement, []any, error) {
+	shape, err := prepareWithContext(cache, stmt, context)
+	if err != nil {
+		return CompiledStatement{}, nil, err
+	}
+	args, err = shape.Bind(args)
+	if err != nil {
+		return CompiledStatement{}, nil, err
+	}
+	return shape, args, nil
+}
+
+func prepareWithContext(
+	cache *StatementCache,
+	stmt sst.StatementNode,
+	context shapeContext,
+) (CompiledStatement, error) {
+	if cache == nil {
+		return CompiledStatement{}, ErrNilStatementCache
+	}
+	key, err := deriveShapeKeyWithContext(stmt, context)
 	if err != nil {
 		return CompiledStatement{}, err
 	}
@@ -332,41 +405,12 @@ func Prepare(
 	return shape, nil
 }
 
-// CompileCached returns a cached SQL shape and the supplied runtime values
-// using the default shape context. The shape key is derived from the statement.
-func CompileCached(
-	cache *StatementCache,
-	stmt sst.StatementNode,
-	args []any,
-) (CompiledStatement, []any, error) {
-	return CompileCachedWithContext(cache, stmt, args, DefaultShapeContext())
-}
-
-// CompileCachedWithContext returns a cached SQL shape and supplied runtime
-// values. The shape key is derived from canonical statement structure/context.
-func CompileCachedWithContext(
-	cache *StatementCache,
-	stmt sst.StatementNode,
-	args []any,
-	context ShapeContext,
-) (CompiledStatement, []any, error) {
-	shape, err := Prepare(cache, stmt, context)
-	if err != nil {
-		return CompiledStatement{}, nil, err
-	}
-	args, err = shape.Bind(args)
-	if err != nil {
-		return CompiledStatement{}, nil, err
-	}
-	return shape, args, nil
-}
-
 func compileStatement(
 	stmt sst.StatementNode,
-	context ShapeContext,
+	context shapeContext,
 	key ShapeKey,
 ) (CompiledStatement, []any, error) {
-	sqlText, args, bindings, err := compileWithContext(stmt, context)
+	sqlText, args, bindings, err := compileStatementWithContext(stmt, context)
 	if err != nil {
 		return CompiledStatement{}, nil, err
 	}
@@ -379,7 +423,7 @@ func cloneCompiledStatement(shape CompiledStatement) CompiledStatement {
 }
 
 func newCompiledStatement(sqlText string, argumentCount int) CompiledStatement {
-	context := DefaultShapeContext()
+	context := defaultShapeContext()
 	bindings := make([]Binding, argumentCount)
 	for position := range bindings {
 		bindings[position] = Binding{
@@ -399,13 +443,13 @@ func newCompiledStatementWithContext(
 	sqlText string,
 	bindings []Binding,
 	key ShapeKey,
-	context ShapeContext,
+	context shapeContext,
 ) CompiledStatement {
 	return CompiledStatement{
 		sql:             sqlText,
 		bindLayout:      append([]Binding(nil), bindings...),
 		shapeKey:        key,
-		dialect:         string(context.Dialect.Name()),
-		compilerVersion: context.CompilerVersion,
+		dialect:         string(context.dialect.Name()),
+		compilerVersion: context.compilerVersion,
 	}
 }

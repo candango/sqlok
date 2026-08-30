@@ -1,25 +1,37 @@
+// Package compiler turns SQL semantic-tree statements into SQL and arguments.
 package compiler
 
 import (
 	"fmt"
 	"strings"
 
-	"github.com/candango/sqlok/internal/dialect"
-	"github.com/candango/sqlok/internal/sst"
+	"github.com/candango/sqlok/dialect"
+	"github.com/candango/sqlok/sst"
 )
 
 // Compile compiles a statement node into SQL text and bound arguments using
 // the default dialect.
 func Compile(stmt sst.StatementNode) (string, []any, error) {
-	return CompileWithContext(stmt, DefaultShapeContext())
+	return compileWithContext(stmt, defaultShapeContext())
 }
 
-// CompileWithContext compiles a statement using the supplied dialect context.
-func CompileWithContext(
+// CompileWithDialect compiles a statement using the supplied dialect.
+func CompileWithDialect(
 	stmt sst.StatementNode,
-	context ShapeContext,
+	renderingDialect dialect.Dialect,
 ) (string, []any, error) {
-	sqlText, args, bindings, err := compileWithContext(stmt, context)
+	context, err := newShapeContext(renderingDialect)
+	if err != nil {
+		return "", nil, err
+	}
+	return compileWithContext(stmt, context)
+}
+
+func compileWithContext(
+	stmt sst.StatementNode,
+	context shapeContext,
+) (string, []any, error) {
+	sqlText, args, bindings, err := compileStatementWithContext(stmt, context)
 	if err != nil {
 		return "", nil, err
 	}
@@ -34,9 +46,9 @@ func CompileWithContext(
 	return sqlText, args, nil
 }
 
-func compileWithContext(
+func compileStatementWithContext(
 	stmt sst.StatementNode,
-	context ShapeContext,
+	context shapeContext,
 ) (string, []any, []Binding, error) {
 	if err := context.validate(); err != nil {
 		return "", nil, nil, err
@@ -45,7 +57,7 @@ func compileWithContext(
 		return "", nil, nil, err
 	}
 
-	c := &Compiler{dialect: context.Dialect}
+	c := &Compiler{dialect: context.dialect}
 	if err := stmt.Accept(c); err != nil {
 		return "", nil, nil, err
 	}

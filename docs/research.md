@@ -603,7 +603,7 @@ Sources:
 
 ### SQLok consequence
 
-SQLok follows the same core boundary. `internal/dialect` keeps only:
+SQLok follows the same core boundary. The public `dialect` package keeps only:
 
 - the `Dialect` contract;
 - the generic/default `QuestionMarkDialect`;
@@ -611,5 +611,6 @@ SQLok follows the same core boundary. `internal/dialect` keeps only:
 
 Vendor-specific PostgreSQL, MySQL, and SQLite dialect implementations do not
 belong in this core project. Dedicated external adapters or driver modules
-resolve the vendor dialect and provide it to the compiler. The executor owns
-transport integration; the compiler must not import or register vendor drivers.
+resolve the vendor dialect and provide it to public `compiler` entry points.
+The `executor` owns transport integration; the compiler must not import or
+register vendor drivers.
