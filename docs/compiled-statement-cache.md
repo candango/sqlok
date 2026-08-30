@@ -505,6 +505,78 @@ BenchmarkPlanRegistryHit
   arguments from the ring, and bind without shape-key derivation.
 ```
 
+### Running and comparing benchmarks
+
+`benchstat` is the comparison tool from `golang.org/x/perf`. It reads the
+benchmark output produced by `go test` and compares repeated samples for
+execution time, bytes allocated, and allocations. It is a development tool,
+not a runtime or module dependency.
+
+Install it outside the repository:
+
+```bash
+go install golang.org/x/perf/cmd/benchstat@latest
+```
+
+This writes the binary to `GOBIN` or `GOPATH/bin` and does not change
+`go.mod`, `go.sum`, or the application binary.
+
+Run the current compiler benchmarks with a time-based sample and repetitions:
+
+```bash
+go test -run '^$' \
+  -bench 'Benchmark(ASTCompileExistingStatement|CompileCachedHit|ArgumentRingLookup|ASTCompileCachedShape|PlanRegistryHit)$' \
+  -benchmem -benchtime=1s -count=10 ./internal/compiler
+```
+
+The flags mean:
+
+- `-run '^$'` skips ordinary tests and runs only benchmarks;
+- `-bench` selects the benchmark names under comparison;
+- `-benchmem` reports `B/op` and `allocs/op`;
+- `-benchtime=1s` avoids timer-resolution and short-run GC distortion;
+- `-count=10` provides enough samples for `benchstat` confidence intervals.
+
+To compare a clean baseline with the current tree, both versions must be
+measured with the same command. A temporary detached worktree keeps the
+baseline separate and must be removed after the comparison:
+
+```bash
+set -eu
+before=$(mktemp)
+after=$(mktemp)
+worktree=$(mktemp -d)
+cleanup() {
+  git worktree remove --force "$worktree" >/dev/null 2>&1 || true
+  rm -f "$before" "$after"
+}
+trap cleanup EXIT
+
+pattern='Benchmark(ASTCompileExistingStatement|CompileCachedHit|ArgumentRingLookup|ASTCompileCachedShape|PlanRegistryHit)$'
+go test -run '^$' -bench "$pattern" -benchmem -benchtime=1s -count=10 ./internal/compiler > "$after"
+git worktree add --detach "$worktree" <baseline-commit>
+(
+  cd "$worktree"
+  go test -run '^$' -bench "$pattern" -benchmem -benchtime=1s -count=10 ./internal/compiler > "$before"
+)
+benchstat "$before" "$after"
+```
+
+Replace `<baseline-commit>` with the commit being compared, such as
+`b7f03d5`. The command creates no persistent worktree after the `trap`
+cleanup. Do not compare a single short run with a repeated time-based run.
+Record the `benchstat` result and its methodology together; isolated figures
+are useful for local iteration but are not reliable findings.
+
+Interpret the output conservatively:
+
+- `sec/op` is the time per benchmark operation;
+- `B/op` is the allocated memory per operation;
+- `allocs/op` is the number of allocations per operation;
+- `~` means the measured time difference is not statistically significant;
+- a ring-inclusive warm-path result includes the disclosed argument-selection
+  cost and must not be compared directly with a hoisted-argument result.
+
 The warm path is explicit:
 
 ```go
