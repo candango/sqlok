@@ -19,6 +19,9 @@ var (
 	// ErrEmptyShapeKey reports a cache operation without a canonical shape key.
 	ErrEmptyShapeKey = errors.New("statement shape key cannot be empty")
 
+	// ErrInvalidCacheLimit reports a bounded cache without a positive limit.
+	ErrInvalidCacheLimit = errors.New("statement cache limit must be positive")
+
 	// ErrNilPlanRegistry reports an operation through a nil plan registry.
 	ErrNilPlanRegistry = errors.New("plan registry cannot be nil")
 
@@ -148,9 +151,14 @@ func (s CompiledStatement) Bind(args []any) ([]any, error) {
 }
 
 // StatementCache stores immutable compiled statement shapes by canonical key.
+// A zero maxEntries value keeps the compatibility behavior of an unbounded
+// cache. Bounded caches evict entries in insertion order.
 type StatementCache struct {
-	mu      sync.RWMutex
-	entries map[ShapeKey]CompiledStatement
+	mu         sync.RWMutex
+	entries    map[ShapeKey]CompiledStatement
+	order      []ShapeKey
+	head       int
+	maxEntries int
 }
 
 // PlanID identifies a prepared plan through an application-owned stable name.
@@ -212,11 +220,24 @@ func (r *PlanRegistry) Len() int {
 	return length
 }
 
-// NewStatementCache creates an empty concurrent statement-shape cache.
+// NewStatementCache creates an empty concurrent unbounded statement cache.
+// Use NewBoundedStatementCache when a memory limit is required.
 func NewStatementCache() *StatementCache {
 	return &StatementCache{
 		entries: make(map[ShapeKey]CompiledStatement),
 	}
+}
+
+// NewBoundedStatementCache creates a concurrent statement cache with an
+// insertion-order eviction limit.
+func NewBoundedStatementCache(maxEntries int) (*StatementCache, error) {
+	if maxEntries <= 0 {
+		return nil, ErrInvalidCacheLimit
+	}
+	return &StatementCache{
+		entries:    make(map[ShapeKey]CompiledStatement, maxEntries),
+		maxEntries: maxEntries,
+	}, nil
 }
 
 // Get returns a compiled shape without exposing mutable cache state.
@@ -247,7 +268,13 @@ func (c *StatementCache) Put(key ShapeKey, shape CompiledStatement) error {
 	if c.entries == nil {
 		c.entries = make(map[ShapeKey]CompiledStatement)
 	}
+	_, exists := c.entries[key]
 	c.entries[key] = cloneCompiledStatement(shape)
+	if c.maxEntries > 0 && !exists {
+		c.order = append(c.order, key)
+		c.evictOverflowLocked()
+	}
+	c.compactOrderLocked()
 	c.mu.Unlock()
 	return nil
 }
@@ -261,6 +288,7 @@ func (c *StatementCache) Invalidate(key ShapeKey) bool {
 	c.mu.Lock()
 	_, existed := c.entries[key]
 	delete(c.entries, key)
+	c.compactOrderLocked()
 	c.mu.Unlock()
 	return existed
 }
@@ -272,8 +300,26 @@ func (c *StatementCache) Clear() {
 	}
 
 	c.mu.Lock()
-	c.entries = make(map[ShapeKey]CompiledStatement)
+	c.entries = make(map[ShapeKey]CompiledStatement, c.maxEntries)
+	c.order = nil
+	c.head = 0
 	c.mu.Unlock()
+}
+
+func (c *StatementCache) evictOverflowLocked() {
+	for len(c.entries) > c.maxEntries && c.head < len(c.order) {
+		key := c.order[c.head]
+		c.head++
+		delete(c.entries, key)
+	}
+}
+
+func (c *StatementCache) compactOrderLocked() {
+	if c.head == 0 || c.head*2 < len(c.order) {
+		return
+	}
+	c.order = append([]ShapeKey(nil), c.order[c.head:]...)
+	c.head = 0
 }
 
 // Len returns the number of published shapes.

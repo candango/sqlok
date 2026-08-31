@@ -396,6 +396,53 @@ This keeps eviction and invalidation focused on statement shapes for now. The
 artifact unit can be revisited when the ORM/session path has a concrete flush
 implementation and an apples-to-apples benchmark.
 
+## Cache cardinality and memory measurement
+
+The current `StatementCache` was measured with realistic statement-shape
+cardinality tests and synthetic published compiled artifacts. Runtime-value
+variations of one statement shape produce one cache entry, while structurally
+different statements produce one entry per shape.
+
+The retained heap measurement uses `runtime.MemStats.HeapAlloc` after a garbage
+collection and repeats populations of 1,000, 10,000, and 100,000 entries. On
+the Ryzen 5 1600 test machine, the observed retained heap was approximately:
+
+| Entries | Retained heap | Approx. bytes/entry |
+|---:|---:|---:|
+| 1,000 | 263,792–269,528 B | 264–270 B |
+| 10,000 | 2,230,112–2,230,144 B | 223 B |
+| 100,000 | 18,679,776–18,702,096 B | 187 B |
+
+The population benchmark uses prebuilt artifacts and reports the cache storage
+cost separately from AST compilation:
+
+| Entries | B/op | allocs/op |
+|---:|---:|---:|
+| 1,000 | 455,560 | 23 |
+| 10,000 | 3,673,520 | 89 |
+| 100,000 | 29,389,448 | 561 |
+
+These are directional measurements, not a production memory budget. They do
+establish that an unbounded shape cache has linear retained-memory growth, so a
+general bounded policy is now justified. The bound still needs an explicit
+operational choice; it must not be inferred from the old, already-closed
+pagination-fragmentation finding.
+
+## Bounded cache policy
+
+`NewBoundedStatementCache(maxEntries)` provides an explicit bounded variant of
+`StatementCache`. It evicts the oldest inserted shape when the limit is
+exceeded. Updating an existing key does not consume another entry, and
+`Invalidate` and `Clear` remove published shapes without changing the public
+binding contract.
+
+The policy is insertion-order eviction rather than LRU deliberately: `Get`
+remains a read-only operation, so the bounded cache does not add a write lock or
+promotion allocation to every lookup. `NewStatementCache()` remains the
+unbounded compatibility constructor until an application workload supplies a
+safe default budget. `PlanRegistry` is an application-owned stable-plan index
+and has separate lifecycle responsibilities.
+
 ## Shape identity
 
 A cache key must represent the structure that affects rendered SQL and binding
