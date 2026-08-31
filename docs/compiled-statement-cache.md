@@ -443,6 +443,25 @@ unbounded compatibility constructor until an application workload supplies a
 safe default budget. `PlanRegistry` is an application-owned stable-plan index
 and has separate lifecycle responsibilities.
 
+Use the bounded constructor when the caller owns an explicit memory budget:
+
+```go
+cache, err := compiler.NewBoundedStatementCache(10_000)
+if err != nil {
+    return err
+}
+
+shape, err := compiler.Prepare(cache, stmt, renderingDialect)
+if err != nil {
+    return err
+}
+return executor.Exec(ctx, target, shape, currentArgs)
+```
+
+`maxEntries <= 0` returns `compiler.ErrInvalidCacheLimit`. The constructor
+does not choose a default budget because the measured bytes-per-entry value is
+workload- and shape-dependent.
+
 ## Shape identity
 
 A cache key must represent the structure that affects rendered SQL and binding
