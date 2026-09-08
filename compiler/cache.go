@@ -288,9 +288,39 @@ func (c *StatementCache) Invalidate(key ShapeKey) bool {
 	c.mu.Lock()
 	_, existed := c.entries[key]
 	delete(c.entries, key)
-	c.compactOrderLocked()
+	if c.maxEntries > 0 {
+		c.removeOrderKeyLocked(key)
+		c.compactOrderLocked()
+	}
 	c.mu.Unlock()
 	return existed
+}
+
+// removeOrderKeyLocked removes every queued occurrence of key from the
+// bounded eviction order. Invalidation is infrequent compared with cache
+// reads, so the linear scan keeps the hot Get path simple while ensuring that
+// removed entries cannot retain queue storage or affect later eviction.
+func (c *StatementCache) removeOrderKeyLocked(key ShapeKey) {
+	if c.head >= len(c.order) {
+		c.order = nil
+		c.head = 0
+		return
+	}
+
+	write := c.head
+	for _, queuedKey := range c.order[c.head:] {
+		if queuedKey == key {
+			continue
+		}
+		c.order[write] = queuedKey
+		write++
+	}
+	clear(c.order[write:])
+	c.order = c.order[:write]
+	if c.head == len(c.order) {
+		c.order = nil
+		c.head = 0
+	}
 }
 
 // Clear removes every compiled shape from the cache.
@@ -309,6 +339,7 @@ func (c *StatementCache) Clear() {
 func (c *StatementCache) evictOverflowLocked() {
 	for len(c.entries) > c.maxEntries && c.head < len(c.order) {
 		key := c.order[c.head]
+		c.order[c.head] = ""
 		c.head++
 		delete(c.entries, key)
 	}
