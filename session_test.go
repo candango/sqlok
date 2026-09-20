@@ -27,6 +27,19 @@ type TestCompositeUser struct {
 	Name   string
 }
 
+type TestPrimaryKeyTagUser struct {
+	ID   int `sqlok:"primary_key"`
+	Name string
+}
+
+type TestUnkeyedUser struct {
+	Name string
+}
+
+type TestInvalidPrimaryKeyUser struct {
+	ID []int `sqlok:"pk"`
+}
+
 func TestSession_Add(t *testing.T) {
 	s := NewSession(nil)
 
@@ -82,16 +95,50 @@ func TestSession_Add(t *testing.T) {
 		err := s.Add(user)
 		assert.NoError(t, err)
 
+		mapper, mapperErr := NewMapper[TestCompositeUser]()
+		assert.NoError(t, mapperErr)
+		compositeKey, present, keyErr := mapper.PrimaryKey(user)
+		assert.NoError(t, keyErr)
+		assert.True(t, present)
+
 		reflectType := reflect.TypeOf(TestCompositeUser{})
-		compositeKey := "composite:1|100"
 		assert.Equal(t, user, s.identityMap[reflectType][compositeKey])
+	})
+
+	t.Run("Should add entities without a primary-key mapping to pending", func(t *testing.T) {
+		s = NewSession(nil)
+		user := &TestUnkeyedUser{Name: "New User"}
+		assert.NoError(t, s.Add(user))
+		assert.Contains(t, s.pending, user)
+	})
+
+	t.Run("Should reject non-comparable primary keys", func(t *testing.T) {
+		s = NewSession(nil)
+		user := &TestInvalidPrimaryKeyUser{ID: []int{1}}
+		assert.Error(t, s.Add(user))
+		assert.Empty(t, s.pending)
+	})
+
+	t.Run("Should recognize the primary_key tag", func(t *testing.T) {
+		s = NewSession(nil)
+		user := &TestPrimaryKeyTagUser{ID: 11, Name: "Tagged User"}
+		assert.NoError(t, s.Add(user))
+
+		reflectType := reflect.TypeFor[TestPrimaryKeyTagUser]()
+		assert.Equal(t, user, s.identityMap[reflectType][11])
+	})
+
+	t.Run("Should reject nil and non-struct pointers", func(t *testing.T) {
+		var nilUser *TestUser
+		assert.Error(t, s.Add(nilUser))
+		assert.Error(t, s.Add(new(int)))
 	})
 }
 
 func TestSession_Load(t *testing.T) {
 	s := NewSession(nil)
 	user := &TestUser{TestUserBase: TestUserBase{Id: 50}, Name: "Database User"}
-	s.Add(user)
+	assert.NoError(t, s.Add(user))
 
 	t.Run("Should load existing object from identity map", func(t *testing.T) {
 		loaded, err := Load[TestUser](s, 50)
@@ -103,9 +150,15 @@ func TestSession_Load(t *testing.T) {
 
 	t.Run("Should load existing composite object from identity map", func(t *testing.T) {
 		comp := &TestCompositeUser{OrgId: 1, UserId: 200, Name: "Comp User"}
-		s.Add(comp)
+		assert.NoError(t, s.Add(comp))
 
-		loaded, err := Load[TestCompositeUser](s, "composite:1|200")
+		mapper, mapperErr := NewMapper[TestCompositeUser]()
+		assert.NoError(t, mapperErr)
+		identity, present, keyErr := mapper.PrimaryKey(comp)
+		assert.NoError(t, keyErr)
+		assert.True(t, present)
+
+		loaded, err := Load[TestCompositeUser](s, identity)
 		assert.NoError(t, err)
 		assert.Equal(t, comp, loaded)
 	})

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 )
 
 var ErrIdentityConflict = errors.New("identity map conflict: another object with the same ID already exists in the session")
@@ -40,38 +39,41 @@ func NewSession(db *sql.DB) *Session {
 // Add registers an entity into the session's identity map.
 // If the entity has no primary key, it is added to the pending queue for INSERT.
 func (s *Session) Add(ent any) error {
-	v := reflect.ValueOf(ent)
-	if v.Kind() != reflect.Ptr {
-		return errors.New("only pointers to structs can be added to session")
+	value := reflect.ValueOf(ent)
+	if !value.IsValid() || value.Kind() != reflect.Pointer || value.IsNil() ||
+		value.Elem().Kind() != reflect.Struct {
+		return errors.New("only non-nil pointers to structs can be added to session")
 	}
 
-	t := v.Type().Elem()
-	id := s.getPrimaryKey(ent)
-
-	if id != nil {
-		if s.identityMap[t] == nil {
-			s.identityMap[t] = make(map[any]any)
-		}
-
-		if existing, ok := s.identityMap[t][id]; ok {
-			if existing != ent {
-				// TODO: Future - implement merge strategy here
-				return ErrIdentityConflict
-			}
-			return nil // Object already tracked, skipping.
-		}
-
-		// Register the pointer
-		s.identityMap[t][id] = ent
-
-		// Take the initial "snapshot" for dirty checking later
-		// s.takeSnapshot(ent)
+	entityType := value.Elem().Type()
+	descriptor, err := mapperDescriptorFor(entityType)
+	if err != nil {
+		return fmt.Errorf("map session entity %s: %w", entityType, err)
+	}
+	identity, present, err := descriptor.primaryKey(value.Elem())
+	if errors.Is(err, ErrNoPrimaryKey) {
+		s.pending = append(s.pending, ent)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read session primary key for %s: %w", entityType, err)
+	}
+	if !present {
+		s.pending = append(s.pending, ent)
 		return nil
 	}
 
-	// No ID? It's a new entity, queue for Flush -> INSERT
-	s.pending = append(s.pending, ent)
+	if s.identityMap[entityType] == nil {
+		s.identityMap[entityType] = make(map[any]any)
+	}
+	if existing, exists := s.identityMap[entityType][identity]; exists {
+		if existing != ent {
+			return ErrIdentityConflict
+		}
+		return nil
+	}
 
+	s.identityMap[entityType][identity] = ent
 	return nil
 }
 
@@ -90,68 +92,4 @@ func Load[T any](s *Session, id any) (*T, error) {
 
 	// TODO: Future - Database lookup using Mapper and Builder
 	return nil, nil
-}
-
-// getPrimaryKey scans for all fields tagged with 'pk' and returns a single or composite identity.
-func (s *Session) getPrimaryKey(ent any) any {
-	v := reflect.ValueOf(ent).Elem()
-	pks := s.collectPKs(v)
-
-	if len(pks) == 0 {
-		return nil
-	}
-
-	// Simple PK: Return the single value (int, string, etc.)
-	if len(pks) == 1 {
-		return pks[0]
-	}
-
-	// Composite PK: Build a unique string key for the identity map.
-	var sb strings.Builder
-	sb.WriteString("composite:")
-	for i, pk := range pks {
-		if i > 0 {
-			sb.WriteString("|")
-		}
-		sb.WriteString(fmt.Sprintf("%v", pk))
-	}
-	return sb.String()
-}
-
-// collectPKs recursively gathers all field values marked with 'pk'.
-func (s *Session) collectPKs(v reflect.Value) []any {
-	var pks []any
-	t := v.Type()
-	for i := range t.NumField() {
-		field := t.Field(i)
-		fieldVal := v.Field(i)
-
-		// Support for embedded structs (Composition)
-		if field.Anonymous && field.Type.Kind() == reflect.Struct {
-			pks = append(pks, s.collectPKs(fieldVal)...)
-			continue
-		}
-
-		if tag := field.Tag.Get("sqlok"); tag == "pk" {
-			val := s.extractValue(fieldVal)
-			if val != nil {
-				pks = append(pks, val)
-			}
-		}
-	}
-	return pks
-}
-
-// extractValue handles pointer vs value logic for PK fields.
-func (s *Session) extractValue(v reflect.Value) any {
-	if v.Kind() == reflect.Ptr {
-		if v.IsNil() {
-			return nil
-		}
-		return v.Elem().Interface()
-	}
-	if v.IsZero() {
-		return nil
-	}
-	return v.Interface()
 }
