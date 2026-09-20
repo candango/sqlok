@@ -148,6 +148,76 @@ func TestMapperScansEmbeddedFieldsAndExtractsValues(t *testing.T) {
 	}, values)
 }
 
+func TestMapperReusesScanAndValueBuffers(t *testing.T) {
+	mapper, err := NewMapper[MapperTestProfile]()
+	require.NoError(t, err)
+
+	scanBuffer := mapper.NewScanBuffer()
+	entity := new(MapperTestProfile)
+	require.NoError(t, mapper.ScanIntoWithBuffer(
+		mapperSliceScanner{values: []any{7, "Ana", 42}},
+		entity,
+		scanBuffer,
+	))
+	assert.Equal(t, MapperTestProfile{
+		MapperTestBase: MapperTestBase{ID: 7},
+		DisplayName:    "Ana",
+		Age:            42,
+	}, *entity)
+	assert.Equal(t, []any{nil, nil, nil}, scanBuffer.destinations)
+	assert.ErrorIs(t, mapper.ScanIntoWithBuffer(
+		mapperSliceScanner{},
+		entity,
+		nil,
+	), ErrNilMapperScanBuffer)
+
+	valueBuffer := mapper.NewValueBuffer()
+	values, err := mapper.ValuesInto(entity, valueBuffer)
+	require.NoError(t, err)
+	assert.Equal(t, []MappedValue{
+		{Column: "id", Value: 7, Primary: true},
+		{Column: "display_name", Value: "Ana"},
+		{Column: "age", Value: 42},
+	}, values)
+	assert.ErrorIs(t, func() error {
+		_, err := mapper.ValuesInto(entity, nil)
+		return err
+	}(), ErrNilMapperValueBuffer)
+}
+
+func TestMapperScansConcurrently(t *testing.T) {
+	mapper, err := NewMapper[MapperTestProfile]()
+	require.NoError(t, err)
+
+	const workers = 16
+	errCh := make(chan error, workers)
+	var wait sync.WaitGroup
+	for worker := range workers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			entity, scanErr := mapper.Scan(mapperSliceScanner{values: []any{
+				worker + 1,
+				"worker",
+				worker + 100,
+			}})
+			if scanErr != nil {
+				errCh <- scanErr
+				return
+			}
+			if entity.ID != worker+1 || entity.DisplayName != "worker" ||
+				entity.Age != worker+100 {
+				errCh <- fmt.Errorf("worker %d received another scan result", worker)
+			}
+		}()
+	}
+	wait.Wait()
+	close(errCh)
+	for scanErr := range errCh {
+		assert.NoError(t, scanErr)
+	}
+}
+
 func TestMapperAllocatesEmbeddedPointerDuringScan(t *testing.T) {
 	mapper, err := NewMapper[MapperPointerEntity]()
 	require.NoError(t, err)

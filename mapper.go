@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	"unsafe"
 )
 
 var (
@@ -24,6 +25,12 @@ var (
 
 	// ErrNilEntity reports an operation requiring a non-nil entity pointer.
 	ErrNilEntity = errors.New("mapper entity cannot be nil")
+
+	// ErrNilMapperScanBuffer reports scanning with a nil reusable buffer.
+	ErrNilMapperScanBuffer = errors.New("mapper scan buffer cannot be nil")
+
+	// ErrNilMapperValueBuffer reports extracting values with a nil reusable buffer.
+	ErrNilMapperValueBuffer = errors.New("mapper value buffer cannot be nil")
 )
 
 // Scanner is the row-scanning behavior implemented by *sql.Row and *sql.Rows.
@@ -44,18 +51,66 @@ type Mapper[T any] struct {
 	descriptor *mapperDescriptor
 }
 
-type mappedField struct {
-	column  string
-	index   []int
-	primary bool
-	typ     reflect.Type
+// MapperScanBuffer owns reusable scan destinations for one Mapper descriptor.
+// A buffer must not be used by concurrent scans.
+type MapperScanBuffer[T any] struct {
+	descriptor   *mapperDescriptor
+	destinations []any
 }
+
+// MapperValueBuffer owns reusable extracted values for one Mapper descriptor.
+// Callers must consume ValuesInto's result before reusing the buffer.
+type MapperValueBuffer[T any] struct {
+	descriptor *mapperDescriptor
+	values     []MappedValue
+}
+
+type mappedField struct {
+	column      string
+	index       []int
+	primary     bool
+	direct      bool
+	offset      uintptr
+	destination mapperDestinationKind
+	typ         reflect.Type
+}
+
+// mapperDestinationKind identifies built-in field types that may use the
+// unsafe fast path. It applies only to direct paths with no embedded pointers;
+// all other fields retain reflection traversal.
+type mapperDestinationKind uint8
+
+const (
+	mapperDestinationReflect mapperDestinationKind = iota
+	mapperDestinationBool
+	mapperDestinationInt
+	mapperDestinationInt8
+	mapperDestinationInt16
+	mapperDestinationInt32
+	mapperDestinationInt64
+	mapperDestinationUint
+	mapperDestinationUint8
+	mapperDestinationUint16
+	mapperDestinationUint32
+	mapperDestinationUint64
+	mapperDestinationUintptr
+	mapperDestinationFloat32
+	mapperDestinationFloat64
+	mapperDestinationString
+	mapperDestinationBytes
+)
 
 type mapperDescriptor struct {
 	typ           reflect.Type
 	table         string
 	fields        []mappedField
 	primaryFields []int
+	valueTemplate []MappedValue
+	scanBuffers   sync.Pool
+}
+
+type mapperScanDestinations struct {
+	values []any
 }
 
 type descriptorEntry struct {
@@ -64,7 +119,25 @@ type descriptorEntry struct {
 	err        error
 }
 
-var mapperDescriptors sync.Map
+var (
+	mapperDescriptors = sync.Map{}
+	mapperBoolType    = reflect.TypeFor[bool]()
+	mapperIntType     = reflect.TypeFor[int]()
+	mapperInt8Type    = reflect.TypeFor[int8]()
+	mapperInt16Type   = reflect.TypeFor[int16]()
+	mapperInt32Type   = reflect.TypeFor[int32]()
+	mapperInt64Type   = reflect.TypeFor[int64]()
+	mapperUintType    = reflect.TypeFor[uint]()
+	mapperUint8Type   = reflect.TypeFor[uint8]()
+	mapperUint16Type  = reflect.TypeFor[uint16]()
+	mapperUint32Type  = reflect.TypeFor[uint32]()
+	mapperUint64Type  = reflect.TypeFor[uint64]()
+	mapperUintptrType = reflect.TypeFor[uintptr]()
+	mapperFloat32Type = reflect.TypeFor[float32]()
+	mapperFloat64Type = reflect.TypeFor[float64]()
+	mapperStringType  = reflect.TypeFor[string]()
+	mapperBytesType   = reflect.TypeFor[[]byte]()
+)
 
 // NewMapper returns a Mapper backed by the immutable descriptor for T.
 func NewMapper[T any]() (*Mapper[T], error) {
@@ -96,11 +169,22 @@ func buildMapperDescriptor(typ reflect.Type) (*mapperDescriptor, error) {
 		table: mapperTableName(typ),
 	}
 	columns := make(map[string]string)
-	if err := appendMappedFields(descriptor, typ, nil, columns); err != nil {
+	if err := appendMappedFields(descriptor, typ, nil, 0, false, columns); err != nil {
 		return nil, err
 	}
 	if len(descriptor.fields) == 0 {
 		return nil, fmt.Errorf("%w: %s", ErrNoMappedFields, typ)
+	}
+	fieldCount := len(descriptor.fields)
+	descriptor.valueTemplate = make([]MappedValue, fieldCount)
+	for position, field := range descriptor.fields {
+		descriptor.valueTemplate[position] = MappedValue{
+			Column:  field.column,
+			Primary: field.primary,
+		}
+	}
+	descriptor.scanBuffers.New = func() any {
+		return &mapperScanDestinations{values: make([]any, fieldCount)}
 	}
 	return descriptor, nil
 }
@@ -109,6 +193,8 @@ func appendMappedFields(
 	descriptor *mapperDescriptor,
 	typ reflect.Type,
 	prefix []int,
+	offset uintptr,
+	pointerPath bool,
 	columns map[string]string,
 ) error {
 	for position := range typ.NumField() {
@@ -128,7 +214,14 @@ func appendMappedFields(
 			embeddedType = embeddedType.Elem()
 		}
 		if field.Anonymous && embeddedType.Kind() == reflect.Struct && tag.column == "" {
-			if err := appendMappedFields(descriptor, embeddedType, index, columns); err != nil {
+			if err := appendMappedFields(
+				descriptor,
+				embeddedType,
+				index,
+				offset+field.Offset,
+				pointerPath || field.Type.Kind() == reflect.Pointer,
+				columns,
+			); err != nil {
 				return err
 			}
 			continue
@@ -151,10 +244,13 @@ func appendMappedFields(
 
 		mappedPosition := len(descriptor.fields)
 		descriptor.fields = append(descriptor.fields, mappedField{
-			column:  column,
-			index:   index,
-			primary: tag.primary,
-			typ:     field.Type,
+			column:      column,
+			index:       index,
+			primary:     tag.primary,
+			direct:      !pointerPath,
+			offset:      offset + field.Offset,
+			destination: mapperDestinationKindFor(field.Type),
+			typ:         field.Type,
 		})
 		if tag.primary {
 			descriptor.primaryFields = append(
@@ -170,6 +266,45 @@ type mapperTag struct {
 	column  string
 	primary bool
 	skip    bool
+}
+
+func mapperDestinationKindFor(typ reflect.Type) mapperDestinationKind {
+	switch typ {
+	case mapperBoolType:
+		return mapperDestinationBool
+	case mapperIntType:
+		return mapperDestinationInt
+	case mapperInt8Type:
+		return mapperDestinationInt8
+	case mapperInt16Type:
+		return mapperDestinationInt16
+	case mapperInt32Type:
+		return mapperDestinationInt32
+	case mapperInt64Type:
+		return mapperDestinationInt64
+	case mapperUintType:
+		return mapperDestinationUint
+	case mapperUint8Type:
+		return mapperDestinationUint8
+	case mapperUint16Type:
+		return mapperDestinationUint16
+	case mapperUint32Type:
+		return mapperDestinationUint32
+	case mapperUint64Type:
+		return mapperDestinationUint64
+	case mapperUintptrType:
+		return mapperDestinationUintptr
+	case mapperFloat32Type:
+		return mapperDestinationFloat32
+	case mapperFloat64Type:
+		return mapperDestinationFloat64
+	case mapperStringType:
+		return mapperDestinationString
+	case mapperBytesType:
+		return mapperDestinationBytes
+	default:
+		return mapperDestinationReflect
+	}
 }
 
 func parseMapperTag(value string) mapperTag {
@@ -250,6 +385,46 @@ func (m *Mapper[T]) Scan(scanner Scanner) (*T, error) {
 
 // ScanInto populates entity from scanner in Columns order.
 func (m *Mapper[T]) ScanInto(scanner Scanner, entity *T) error {
+	if err := m.validateScan(scanner, entity); err != nil {
+		return err
+	}
+	buffer := m.descriptor.scanBuffers.Get().(*mapperScanDestinations)
+	err := m.scanInto(scanner, entity, buffer.values)
+	m.descriptor.scanBuffers.Put(buffer)
+	return err
+}
+
+// NewScanBuffer creates reusable destinations for scans through m. The buffer
+// is execution-owned and must not be used concurrently.
+func (m *Mapper[T]) NewScanBuffer() *MapperScanBuffer[T] {
+	if m == nil || m.descriptor == nil {
+		return nil
+	}
+	return &MapperScanBuffer[T]{
+		descriptor:   m.descriptor,
+		destinations: make([]any, len(m.descriptor.fields)),
+	}
+}
+
+// ScanIntoWithBuffer populates entity while reusing buffer's destinations.
+func (m *Mapper[T]) ScanIntoWithBuffer(
+	scanner Scanner,
+	entity *T,
+	buffer *MapperScanBuffer[T],
+) error {
+	if err := m.validateScan(scanner, entity); err != nil {
+		return err
+	}
+	if buffer == nil {
+		return ErrNilMapperScanBuffer
+	}
+	if buffer.descriptor != m.descriptor {
+		return errors.New("mapper scan buffer belongs to another mapper")
+	}
+	return m.scanInto(scanner, entity, buffer.destinations)
+}
+
+func (m *Mapper[T]) validateScan(scanner Scanner, entity *T) error {
 	if scanner == nil {
 		return errors.New("mapper scanner cannot be nil")
 	}
@@ -259,17 +434,34 @@ func (m *Mapper[T]) ScanInto(scanner Scanner, entity *T) error {
 	if m == nil || m.descriptor == nil {
 		return errors.New("mapper cannot be nil")
 	}
+	return nil
+}
 
-	root := reflect.ValueOf(entity).Elem()
-	destinations := make([]any, len(m.descriptor.fields))
+func (m *Mapper[T]) scanInto(
+	scanner Scanner,
+	entity *T,
+	destinations []any,
+) error {
+	rootPointer := unsafe.Pointer(entity)
+	var root reflect.Value
 	for position, field := range m.descriptor.fields {
-		value, err := writableMappedField(root, field.index)
+		if field.direct && field.destination != mapperDestinationReflect {
+			destinations[position] = mapperScanDestination(rootPointer, field)
+			continue
+		}
+		if !root.IsValid() {
+			root = reflect.ValueOf(entity).Elem()
+		}
+		value, err := writableMappedField(root, field)
 		if err != nil {
+			clear(destinations)
 			return fmt.Errorf("map column %q: %w", field.column, err)
 		}
 		destinations[position] = value.Addr().Interface()
 	}
-	if err := scanner.Scan(destinations...); err != nil {
+	err := scanner.Scan(destinations...)
+	clear(destinations)
+	if err != nil {
 		return fmt.Errorf("scan %s: %w", m.descriptor.typ, err)
 	}
 	return nil
@@ -284,21 +476,60 @@ func (m *Mapper[T]) Values(entity *T) ([]MappedValue, error) {
 		return nil, errors.New("mapper cannot be nil")
 	}
 
-	root := reflect.ValueOf(entity).Elem()
-	values := make([]MappedValue, len(m.descriptor.fields))
-	for position, field := range m.descriptor.fields {
-		value, present := readableMappedField(root, field.index)
-		var current any
-		if present {
-			current = value.Interface()
-		}
-		values[position] = MappedValue{
-			Column:  field.column,
-			Value:   current,
-			Primary: field.primary,
-		}
+	values := append([]MappedValue(nil), m.descriptor.valueTemplate...)
+	return m.extractValues(entity, values), nil
+}
+
+// NewValueBuffer creates reusable storage for values extracted through m. The
+// buffer is execution-owned and must not be used concurrently.
+func (m *Mapper[T]) NewValueBuffer() *MapperValueBuffer[T] {
+	if m == nil || m.descriptor == nil {
+		return nil
 	}
-	return values, nil
+	values := append([]MappedValue(nil), m.descriptor.valueTemplate...)
+	return &MapperValueBuffer[T]{descriptor: m.descriptor, values: values}
+}
+
+// ValuesInto extracts mapped values while reusing buffer's storage. The
+// returned slice becomes invalid when buffer is reused.
+func (m *Mapper[T]) ValuesInto(
+	entity *T,
+	buffer *MapperValueBuffer[T],
+) ([]MappedValue, error) {
+	if entity == nil {
+		return nil, ErrNilEntity
+	}
+	if m == nil || m.descriptor == nil {
+		return nil, errors.New("mapper cannot be nil")
+	}
+	if buffer == nil {
+		return nil, ErrNilMapperValueBuffer
+	}
+	if buffer.descriptor != m.descriptor {
+		return nil, errors.New("mapper value buffer belongs to another mapper")
+	}
+	return m.extractValues(entity, buffer.values), nil
+}
+
+func (m *Mapper[T]) extractValues(entity *T, values []MappedValue) []MappedValue {
+	rootPointer := unsafe.Pointer(entity)
+	var root reflect.Value
+	for position, field := range m.descriptor.fields {
+		if field.direct && field.destination != mapperDestinationReflect {
+			values[position].Value = mapperFieldValue(rootPointer, field)
+			continue
+		}
+		if !root.IsValid() {
+			root = reflect.ValueOf(entity).Elem()
+		}
+		value, present := readableMappedField(root, field)
+		if present {
+			values[position].Value = value.Interface()
+			continue
+		}
+		values[position].Value = nil
+	}
+	return values
 }
 
 // PrimaryKey returns the entity identity and whether every primary-key field
@@ -318,40 +549,57 @@ func (d *mapperDescriptor) primaryKey(root reflect.Value) (any, bool, error) {
 	if len(d.primaryFields) == 0 {
 		return nil, false, fmt.Errorf("%w: %s", ErrNoPrimaryKey, d.typ)
 	}
+	if len(d.primaryFields) == 1 {
+		return d.primaryKeyField(root, d.fields[d.primaryFields[0]])
+	}
 
 	values := make([]any, len(d.primaryFields))
 	for position, fieldPosition := range d.primaryFields {
-		field := d.fields[fieldPosition]
-		value, present := readableMappedField(root, field.index)
-		if !present {
-			return nil, false, nil
-		}
-
-		wasPointer := value.Kind() == reflect.Pointer
-		for value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface {
-			if value.IsNil() {
-				return nil, false, nil
-			}
-			value = value.Elem()
-		}
-		if !wasPointer && value.IsZero() {
-			return nil, false, nil
-		}
-		current := value.Interface()
-		if !reflect.TypeOf(current).Comparable() {
-			return nil, false, fmt.Errorf(
-				"primary key column %q has non-comparable type %T",
-				field.column,
-				current,
-			)
+		current, present, err := d.primaryKeyField(root, d.fields[fieldPosition])
+		if err != nil || !present {
+			return current, present, err
 		}
 		values[position] = current
 	}
-
-	if len(values) == 1 {
-		return values[0], true, nil
-	}
 	return encodeCompositeKey(values), true, nil
+}
+
+func (d *mapperDescriptor) primaryKeyField(
+	root reflect.Value,
+	field mappedField,
+) (any, bool, error) {
+	if field.direct && field.typ == mapperIntType {
+		identity := int(directMappedField(root, field.index).Int())
+		if identity == 0 {
+			return nil, false, nil
+		}
+		return identity, true, nil
+	}
+
+	value, present := readableMappedField(root, field)
+	if !present {
+		return nil, false, nil
+	}
+
+	wasPointer := value.Kind() == reflect.Pointer
+	for value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return nil, false, nil
+		}
+		value = value.Elem()
+	}
+	if !wasPointer && value.IsZero() {
+		return nil, false, nil
+	}
+	current := value.Interface()
+	if !reflect.TypeOf(current).Comparable() {
+		return nil, false, fmt.Errorf(
+			"primary key column %q has non-comparable type %T",
+			field.column,
+			current,
+		)
+	}
+	return current, true, nil
 }
 
 func encodeCompositeKey(values []any) string {
@@ -364,9 +612,115 @@ func encodeCompositeKey(values []any) string {
 	return builder.String()
 }
 
-func writableMappedField(root reflect.Value, index []int) (reflect.Value, error) {
+// mapperFieldValue reads a direct built-in field. field.offset is the sum of
+// value-embedded struct offsets, and root remains live for the whole call.
+func mapperFieldValue(root unsafe.Pointer, field mappedField) any {
+	pointer := unsafe.Add(root, field.offset)
+	switch field.destination {
+	case mapperDestinationBool:
+		return *(*bool)(pointer)
+	case mapperDestinationInt:
+		return *(*int)(pointer)
+	case mapperDestinationInt8:
+		return *(*int8)(pointer)
+	case mapperDestinationInt16:
+		return *(*int16)(pointer)
+	case mapperDestinationInt32:
+		return *(*int32)(pointer)
+	case mapperDestinationInt64:
+		return *(*int64)(pointer)
+	case mapperDestinationUint:
+		return *(*uint)(pointer)
+	case mapperDestinationUint8:
+		return *(*uint8)(pointer)
+	case mapperDestinationUint16:
+		return *(*uint16)(pointer)
+	case mapperDestinationUint32:
+		return *(*uint32)(pointer)
+	case mapperDestinationUint64:
+		return *(*uint64)(pointer)
+	case mapperDestinationUintptr:
+		return *(*uintptr)(pointer)
+	case mapperDestinationFloat32:
+		return *(*float32)(pointer)
+	case mapperDestinationFloat64:
+		return *(*float64)(pointer)
+	case mapperDestinationString:
+		return *(*string)(pointer)
+	case mapperDestinationBytes:
+		return *(*[]byte)(pointer)
+	default:
+		panic("sqlok: unsupported mapper field value")
+	}
+}
+
+// mapperScanDestination returns a typed pointer to a direct built-in field.
+// The pointer is consumed synchronously by Scanner.Scan before destinations
+// are cleared, so it cannot outlive entity.
+func mapperScanDestination(root unsafe.Pointer, field mappedField) any {
+	pointer := unsafe.Add(root, field.offset)
+	switch field.destination {
+	case mapperDestinationBool:
+		return (*bool)(pointer)
+	case mapperDestinationInt:
+		return (*int)(pointer)
+	case mapperDestinationInt8:
+		return (*int8)(pointer)
+	case mapperDestinationInt16:
+		return (*int16)(pointer)
+	case mapperDestinationInt32:
+		return (*int32)(pointer)
+	case mapperDestinationInt64:
+		return (*int64)(pointer)
+	case mapperDestinationUint:
+		return (*uint)(pointer)
+	case mapperDestinationUint8:
+		return (*uint8)(pointer)
+	case mapperDestinationUint16:
+		return (*uint16)(pointer)
+	case mapperDestinationUint32:
+		return (*uint32)(pointer)
+	case mapperDestinationUint64:
+		return (*uint64)(pointer)
+	case mapperDestinationUintptr:
+		return (*uintptr)(pointer)
+	case mapperDestinationFloat32:
+		return (*float32)(pointer)
+	case mapperDestinationFloat64:
+		return (*float64)(pointer)
+	case mapperDestinationString:
+		return (*string)(pointer)
+	case mapperDestinationBytes:
+		return (*[]byte)(pointer)
+	default:
+		panic("sqlok: unsupported mapper scan destination")
+	}
+}
+
+func directMappedField(root reflect.Value, index []int) reflect.Value {
+	switch len(index) {
+	case 1:
+		return root.Field(index[0])
+	case 2:
+		return root.Field(index[0]).Field(index[1])
+	case 3:
+		return root.Field(index[0]).Field(index[1]).Field(index[2])
+	default:
+		return root.FieldByIndex(index)
+	}
+}
+
+func writableMappedField(root reflect.Value, field mappedField) (reflect.Value, error) {
+	if field.direct {
+		value := directMappedField(root, field.index)
+		if !value.CanAddr() || !value.CanSet() {
+			return reflect.Value{}, errors.New("mapped field is not writable")
+		}
+		return value, nil
+	}
+
 	current := root
-	for offset, position := range index {
+	for offset, position := range field.index {
 		for current.Kind() == reflect.Pointer {
 			if current.IsNil() {
 				if !current.CanSet() {
@@ -391,9 +745,13 @@ func writableMappedField(root reflect.Value, index []int) (reflect.Value, error)
 	return current, nil
 }
 
-func readableMappedField(root reflect.Value, index []int) (reflect.Value, bool) {
+func readableMappedField(root reflect.Value, field mappedField) (reflect.Value, bool) {
+	if field.direct {
+		return directMappedField(root, field.index), true
+	}
+
 	current := root
-	for _, position := range index {
+	for _, position := range field.index {
 		for current.Kind() == reflect.Pointer {
 			if current.IsNil() {
 				return reflect.Value{}, false
