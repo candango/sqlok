@@ -319,18 +319,21 @@ All strategies must obey the same rules:
 
 ## Session placement
 
-The future ORM path should use the cache below the Session boundary:
+The future ORM path should use shared compiled artifacts below the Session
+boundary while keeping mapping and lifecycle responsibilities separate:
 
 ```text
+Mapper
+  └── entity metadata, scan targets, primary keys, mapped values
+
 Session
   ├── identity map
-  ├── pending and dirty entities
-  ├── transaction/unit-of-work coordination
-  └── flush
-        → mapper
-        → statement shape cache
-        → current bound args
-        → database/sql.Tx
+  ├── pending entities and dirty snapshots
+  ├── load/query orchestration
+  └── explicit transaction/unit-of-work coordination
+        → statement shape cache or PlanRegistry
+        → current ArgumentBuffer
+        → database/sql Executor
 ```
 
 A Session can benefit from the cache when repeated flushes produce the same
@@ -357,34 +360,33 @@ an API that does not exist.
 The current benchmark boundary is the prepared statement artifact:
 
 ```text
-statement shape → CompiledStatement → Bind(current values) → Executor
+statement shape
+  → CompiledStatement
+  → PlanRegistry lookup
+  → Bind([]any) or BindBuffer(ArgumentBuffer)
+  → Executor
 ```
 
-The recorded comparison uses `go test -bench ... -benchmem -benchtime=1s -count=10`
-and `benchstat`, rather than a single short run. On the current
-Ryzen 5 1600 working tree, the measured paths were:
+The controlled workload uses `-benchmem -benchtime=1s -count=5` and
+`benchstat`. On Go 1.27.0, linux/amd64, AMD Ryzen 5 1600, the representative
+scale-1 results were:
 
 | Path | Time | B/op | allocs/op |
 |---|---:|---:|---:|
-| Existing statement compile | 3.762 us ±2% | 1296 | 14 |
-| Ad-hoc `CompileCached` hit | 9.953 us ±7% | 1448 | 28 |
-| Prepared shape with argument ring | 7.089 ns ±1% | 0 | 0 |
-| `PlanRegistry` lookup with argument ring | 68.58 ns ±1% | 0 | 0 |
-| Argument ring lookup calibration | 2.6 ns | 0 | 0 |
+| Direct compile | 4.55 us | 1288 | 15 |
+| Ad-hoc `CompileCached` hit | 11.17 us | 1528 | 32 |
+| `PlanRegistry` hit | 67.9 ns | 0 | 0 |
+| Reused named `ArgumentBuffer` | 68.8–71.4 ns | 0 | 0 |
 
-The cache-hit comparison now reuses one AST on both sides. Removing the
-redundant `StatementCache.Get` clone reduced the hit from 1496 to 1448 B/op
-and from 29 to 28 allocations; `benchstat` found no significant time change.
 The ad-hoc hit remains slower because it derives the shape key on every call.
-These values are machine- and run-dependent; the useful finding is the
-boundary, not the absolute number.
+Stable `PlanID` lookup avoids AST traversal. Named `BindBuffer` now performs
+real logical-slot validation and SQL-order emission while retaining zero
+allocations when its buffer is reused. Full scale results and methodology live
+in `docs/compiler-hardening-review.md`; the benchmark implementation is
+`compiler/cache_workload_bench_test.go`.
 
-There is an important measurement limit: `CompiledStatement.Bind` currently
-checks only the argument count and returns the already ordered argument slice.
-The prepared and registry figures therefore measure plan access, count
-validation, and the explicitly disclosed argument-ring transport—not a logical
-value-to-slot binding transformation. The benchmark suite has no flush
-measurement because there is no flush implementation to exercise.
+The suite still has no flush measurement because no concrete `Session.Flush`
+implementation exists.
 
 Decision for the current cache:
 
@@ -569,7 +571,16 @@ BenchmarkArgumentRingLookup
 
 BenchmarkPlanRegistryHit
   look up one prepared shape by application-owned `PlanID`, select current
-  arguments from the ring, and bind without shape-key derivation.
+  arguments from the ring, and bind without shape-key derivation;
+
+BenchmarkWorkloadCompileDirect / CompileCachedHit / PlanRegistryHit
+  compare the three execution strategies as statement complexity scales;
+
+BenchmarkWorkloadDeriveShapeKey
+  isolate the structural fingerprint cost paid by the ad-hoc cache path;
+
+BenchmarkWorkloadNamedArgumentBufferHit
+  reuse named logical slots and an `ArgumentBuffer` across executions.
 ```
 
 ### Running and comparing benchmarks
@@ -594,6 +605,14 @@ Run the current compiler benchmarks with a time-based sample and repetitions:
 go test -run '^$' \
   -bench 'Benchmark(ASTCompileExistingStatement|CompileCachedHit|ArgumentRingLookup|ASTCompileCachedShape|PlanRegistryHit)$' \
   -benchmem -benchtime=1s -count=10 ./compiler
+```
+
+Run the scalable workload and named-buffer benchmarks separately:
+
+```bash
+go test ./compiler -run '^$' \
+  -bench '^BenchmarkWorkload' \
+  -benchmem -benchtime=1s -count=10
 ```
 
 The flags mean:
@@ -715,19 +734,23 @@ These should remain separate measurements. Adding Session to the first test
 would hide whether a result came from caching SQL compilation or from unrelated
 identity-map and reflection behavior.
 
-## Implementation phases
+## Remaining implementation phases
 
-1. Add an in-memory shape cache around the current compiler without changing
-   the public API.
-2. Introduce a real `CompiledStatement` and automatic bind-layout extraction.
-3. Cache model/reflection descriptors separately from SQL shapes.
-4. Add optional prepared-statement reuse through `database/sql`.
-5. Add persistent, versioned, read-only production artifacts and an explicit
-   warm-up command.
-6. Benchmark direct SQL, cold SQLok, warm SQLok, and ORM Session paths using
-   equivalent statement shapes.
-7. Keep the cache only where the measured warm-path gain justifies its
-   complexity and invalidation cost.
+The compiler artifact, bind layout, bounded cache, and `PlanRegistry` warm path
+are implemented. Remaining work is driven by the public ORM experience:
+
+1. Implement and cache stateless Mapper descriptors separately from SQL shapes.
+2. Refactor Session to consume Mapper metadata for primary keys and mapped
+   values instead of repeating reflection.
+3. Prove database-backed `Session.Load` end to end: prepared plan, execution,
+   row mapping, Identity Map registration, and pointer reuse.
+4. Implement explicit Flush planning for pending and dirty entities.
+5. Expose a cohesive model-oriented API that hides compiler/cache/registry/bind
+   plumbing while retaining Core and direct SQL escape hatches.
+6. Benchmark the complete ORM path against direct SQL, cold Core, and warm Core
+   using equivalent statements and values.
+7. Consider database prepared-statement reuse, persistent artifacts, and warm-up
+   commands only after the real ORM consumer provides evidence for them.
 
 ## Non-goals
 

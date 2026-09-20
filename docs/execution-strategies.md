@@ -50,6 +50,13 @@ The ORM is not the mandatory entry point. A performance-critical operation may
 bypass the ORM and use direct SQL or generated code while the rest of the
 application uses SQLok Core or the ORM layer.
 
+Developer ergonomics is a primary acceptance criterion, not optional polish.
+The public ORM path must not require callers to manage `StatementCache`,
+`PlanRegistry`, `CompiledStatement`, bind layouts, `ArgumentBuffer`, reflection
+metadata, or Identity Map registration. Those are engine responsibilities.
+Application code should operate in terms of models, queries, Sessions, and
+explicit transaction scopes.
+
 ## Core execution
 
 The Core path compiles a statement shape once and delegates each execution to
@@ -65,8 +72,36 @@ _, err = executor.Exec(ctx, tx, plan, currentArgs)
 return err
 ```
 
-`executor.Exec` binds the current values through `CompiledStatement.Bind` before
-calling `ExecContext`. `executor.Query` provides the equivalent read path.
+`executor.Exec` and `executor.Query` support both binding contracts. Unnamed
+legacy layouts use positional `[]any`; named reusable layouts use a
+shape-owned `ArgumentBuffer`, which validates logical slot identity and emits
+values in SQL order before the database call.
+
+Stable repeated operations should prepare once and execute by `PlanID`:
+
+```go
+plan, err := compiler.Prepare(cache, stmt, renderingDialect)
+if err != nil {
+    return err
+}
+if err := registry.Put("users.get", plan); err != nil {
+    return err
+}
+
+plan, ok := registry.Get("users.get")
+if !ok {
+    return errors.New("prepared plan not found")
+}
+args := plan.NewArgumentBuffer()
+if err := args.Set("user_id", userID); err != nil {
+    return err
+}
+_, err = executor.Query(ctx, tx, plan, args)
+return err
+```
+
+The higher-level ORM should hide cache and registry mechanics from application
+code; this explicit form documents the engine boundary.
 
 The Core path owns statement structure, validation, SQL rendering, and bound
 argument ordering. The executor owns connection selection and the actual
@@ -129,7 +164,7 @@ if err != nil {
 
 defer tx.Rollback()
 
-sqlText, args, err := stmt.Compile()
+sqlText, args, err := compiler.CompileWithDialect(stmt, renderingDialect)
 if err != nil {
     return err
 }
@@ -149,28 +184,55 @@ explicit in the API contract.
 
 ## ORM execution
 
-The ORM layer sits above Core:
+The ORM layer sits above Core. Session coordinates the operation; Mapper
+translates between database rows/values and Go entities:
 
 ```text
-SQLok ORM
-  → struct mapper
-  → Session / Unit of Work
-  → flush
-  → SQLok Core
-  → Executor backed by *sql.Tx
+Read:
+  ORM API → Session → prepared SELECT → Executor.Query
+          → Mapper.Scan → Identity Map → entity
+
+Write:
+  ORM API → Session.Flush → Mapper metadata/values
+          → SST/DML → compiled plan → Executor backed by *sql.Tx
 ```
 
-A Session is responsible for ORM state such as:
+Mapper is stateless with respect to execution. It owns:
 
-- identity-map lookups;
+- recursive struct and embedded-field metadata;
+- column names, tags, primary-key paths, and scan targets;
+- row-to-entity mapping;
+- deterministic extraction of mapped field/value pairs.
+
+Mapper does not own Identity Map entries, snapshots, pending entities,
+transactions, caches, or flush decisions.
+
+Session owns ORM state and lifecycle:
+
+- identity-map lookups and pointer reuse;
 - pending new entities;
-- dirty-field or snapshot tracking;
+- snapshots or field fingerprints for dirty checking;
+- database-backed load/query orchestration;
 - flush planning;
-- coordinating multiple CRUD statements in one unit of work.
+- coordinating multiple CRUD statements in one explicit unit of work.
 
 A Session is not responsible for owning the global compiled-statement cache.
 The cache can be shared across Sessions, while identity and transaction state
 remain scoped to the current Session/request.
+
+The first ORM acceptance path is:
+
+```text
+Session.Load(id)
+  → return tracked pointer on Identity Map hit
+  → on miss, execute one prepared SELECT
+  → map one row through Mapper
+  → register and snapshot the entity
+  → return that same pointer on subsequent loads
+```
+
+Only after this path passes end to end should Flush add INSERT handling for
+pending entities and UPDATE handling for dirty persistent entities.
 
 The Session path is valuable for domain productivity and consistency. It is
 not the default recommendation for the hottest performance-sensitive query.
@@ -191,7 +253,7 @@ SQLok Core cold:
   build AST + compile + current args → Executor
 
 SQLok Core warm:
-  cached shape + current args → Executor
+  PlanRegistry + ArgumentBuffer + current values → Executor
 
 SQLok ORM:
   map struct + Session/flush + cached shape + current args → Executor

@@ -6,21 +6,28 @@ current integration-test target.
 
 ## Overview
 
-**sqlok** provides a fluent query-builder prototype and a structured SELECT
-Semantic Tree under development, plus session/identity-map behavior and
-reflection-based schema introspection. The public root package currently exposes the session API; the
-legacy builder and schema loader remain under `internal/` while the public API
-is being consolidated.
+**sqlok** translates SQLAlchemy-style developer ergonomics into idiomatic Go:
+expressive query construction, automatic result mapping, coherent Session
+behavior, and infrastructure hidden from ordinary application call sites. It
+is not a feature-for-feature Python port.
+
+The implemented engine provides SQL Semantic Tree (SST) statement roots, a
+dialect-aware compiler, immutable compiled plans, and driver-agnostic execution
+on top of `database/sql`. The public root package currently exposes an early
+Session and identity-map foundation. Result mapping, database-backed Session
+loading, Unit-of-Work flushing, and the cohesive model-oriented facade are the
+next ORM milestones.
 
 ## Features
 
-- **Query Builder** - Legacy fluent builder under `internal/`, being consolidated
-- **SELECT SST** - SQL Semantic Tree and compiler path under active development
-- **Session API** - Identity-map and unit-of-work foundations in the root package
+- **SQL Semantic Tree** - SELECT, INSERT, UPDATE, and DELETE statement roots
+- **Compiler** - Structural validation, bind layouts, shape identities, and SQL rendering
+- **Compiled Plans** - Bounded statement cache and stable `PlanRegistry` warm path
+- **Driver-Agnostic Execution** - `database/sql`-compatible executor boundary
+- **Session Foundation** - Identity Map and pending-entity tracking in the root package
 - **Schema Management** - Internal table, field, and foreign-key definitions
-- **Parameterized Queries** - Builder support for PostgreSQL-style placeholders
-- **CLI Interface** - Command-line tools for schema inspection and example generation
-- **Type-Safe** - Leverage Go's type system for compile-time safety
+- **Legacy Query Builder** - Internal fluent string builder pending consolidation
+- **CLI Interface** - Schema inspection and example-generation commands
 
 ## Installation
 
@@ -109,7 +116,7 @@ schema loader is currently internal and uses `database/sql`.
 
 - **`session.go`** - Public session and identity-map foundation
 
-- **`schema/`** - Schema definitions
+- **`internal/schema/`** - Internal schema definitions
   - `Table` - Represents a database table
   - `Field` - Represents a table column
   - `ForeignKey` - Represents foreign key constraints with reference options
@@ -120,7 +127,9 @@ schema loader is currently internal and uses `database/sql`.
   - `init.go` - Schema initialization
   - `example.go` - Example code generation
 
-- **Mapper** - Planned result mapping; no implementation exists yet
+- **Mapper** - Next ORM layer; no implementation exists yet. It will own
+  struct metadata, primary-key metadata, column-to-field mapping, row scanning,
+  and deterministic value extraction without owning Session state.
 
 - **`internal/namefmt.go`** - Name formatting utilities
 
@@ -149,14 +158,16 @@ GitHub Actions automatically tests against:
 ```
 .
 ├── cmd/sqlok/          # CLI entry point
+├── compiler/           # SST compiler, shape cache, and prepared plans
+├── dialect/            # Core rendering contract and default dialect
+├── executor/           # database/sql-compatible execution boundary
+├── sst/                # Statement roots, clauses, expressions, and visitors
 ├── internal/
 │   ├── builder.go      # Legacy query builder
-│   ├── compiler/       # SQL compiler for the SELECT SST
 │   ├── schema/         # Internal schema definitions
-│   ├── sst/            # SQL Semantic Tree contracts and concrete nodes
 │   ├── cli/            # CLI commands
 │   └── sqlok.go        # Internal database loading
-├── session.go          # Public session API
+├── session.go          # Early public Session and Identity Map
 ├── dummy/              # Example models and tests
 ├── scripts/postgres/   # Database setup scripts
 └── makefile            # Build targets
@@ -186,8 +197,13 @@ make test
 
 ## Roadmap
 
-- [ ] Add result mapping from database rows to Go values
-- [ ] Add UPDATE and DELETE builders
-- [ ] Support for additional databases (MySQL, SQLite)
-- [ ] Query optimization and performance analysis
-- [ ] Extended documentation and examples
+1. Implement a stateless Mapper for metadata, row scanning, primary keys, and
+   deterministic field/value extraction.
+2. Refactor Session to consume Mapper metadata instead of performing its own
+   reflection.
+3. Complete database-backed `Session.Load`: prepared SELECT, row mapping, and
+   Identity Map registration/reuse.
+4. Implement explicit Unit-of-Work flushing for pending and dirty entities.
+5. Deliver the cohesive model-oriented ORM API: expressive queries, automatic
+   mapping, Session identity, and Flush without exposing engine plumbing.
+6. Add vendor dialect adapters outside the driver-agnostic core as needed.
