@@ -36,6 +36,42 @@ var (
 	ErrUnboundParameterSlot = errors.New(
 		"compiled statement contains unbound parameter slots",
 	)
+
+	// ErrEmptyParameterSlotName reports a named slot without an identity.
+	ErrEmptyParameterSlotName = errors.New("parameter slot name cannot be empty")
+
+	// ErrSlotAddressedArgumentsRequired reports positional input for a layout
+	// that carries explicit logical slot identities.
+	ErrSlotAddressedArgumentsRequired = errors.New(
+		"compiled statement requires slot-addressed arguments",
+	)
+
+	// ErrNilArgumentBuffer reports binding through a nil argument buffer.
+	ErrNilArgumentBuffer = errors.New("argument buffer cannot be nil")
+
+	// ErrArgumentBufferShapeMismatch reports a buffer created for another
+	// compiled statement shape.
+	ErrArgumentBufferShapeMismatch = errors.New(
+		"argument buffer does not match compiled statement",
+	)
+
+	// ErrUnknownBindSlot reports a value addressed to an unknown logical slot.
+	ErrUnknownBindSlot = errors.New("unknown compiled statement bind slot")
+
+	// ErrDuplicateBindSlot reports a logical slot assigned more than once.
+	ErrDuplicateBindSlot = errors.New("compiled statement bind slot already set")
+
+	// ErrMissingBindSlot reports a layout position without a runtime value.
+	ErrMissingBindSlot = errors.New("compiled statement bind slot is missing")
+
+	// ErrInvalidBindPosition reports an argument buffer position outside its
+	// compiled statement layout.
+	ErrInvalidBindPosition = errors.New("compiled statement bind position is invalid")
+
+	// ErrNamedBindPosition reports positional addressing of a named slot.
+	ErrNamedBindPosition = errors.New(
+		"named compiled statement bind slot requires its logical name",
+	)
 )
 
 // ShapeKey identifies one canonical statement shape. Runtime values must not
@@ -91,6 +127,7 @@ const (
 type Binding struct {
 	position int
 	kind     SlotKind
+	source   string
 }
 
 // Position returns the zero-based runtime argument position.
@@ -101,6 +138,12 @@ func (b Binding) Position() int {
 // Kind returns the source kind of the runtime argument position.
 func (b Binding) Kind() SlotKind {
 	return b.kind
+}
+
+// Source returns the logical source slot name, when the binding is explicitly
+// named. An empty source denotes a legacy positional binding.
+func (b Binding) Source() string {
+	return b.source
 }
 
 // CompiledStatement is an immutable SQL template and its bind layout.
@@ -138,8 +181,23 @@ func (s CompiledStatement) CompilerVersion() string {
 	return s.compilerVersion
 }
 
-// Bind validates the current runtime argument count for this statement shape.
+// Bind validates positional runtime arguments for a legacy layout and
+// returns them in SQL order. Named layouts must use BindBuffer so slot
+// identity is explicit.
 func (s CompiledStatement) Bind(args []any) ([]any, error) {
+	return s.bindPositional(args)
+}
+
+// BindBuffer validates slot-addressed runtime arguments and returns them in
+// SQL order.
+func (s CompiledStatement) BindBuffer(buffer *ArgumentBuffer) ([]any, error) {
+	return s.bindArgumentBuffer(buffer)
+}
+
+func (s CompiledStatement) bindPositional(args []any) ([]any, error) {
+	if s.hasNamedBindings() {
+		return nil, ErrSlotAddressedArgumentsRequired
+	}
 	if len(args) != len(s.bindLayout) {
 		return nil, fmt.Errorf(
 			"compiled statement expects %d arguments, got %d",
@@ -148,6 +206,42 @@ func (s CompiledStatement) Bind(args []any) ([]any, error) {
 		)
 	}
 	return args, nil
+}
+
+func (s CompiledStatement) hasNamedBindings() bool {
+	for _, binding := range s.bindLayout {
+		if binding.source != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s CompiledStatement) bindArgumentBuffer(buffer *ArgumentBuffer) ([]any, error) {
+	if buffer == nil {
+		return nil, ErrNilArgumentBuffer
+	}
+	if buffer.shapeKey != s.shapeKey || !sameBindings(buffer.layout, s.bindLayout) {
+		return nil, ErrArgumentBufferShapeMismatch
+	}
+	for position, assigned := range buffer.assigned {
+		if !assigned {
+			return nil, fmt.Errorf("%w at position %d", ErrMissingBindSlot, position)
+		}
+	}
+	return buffer.values, nil
+}
+
+func sameBindings(left, right []Binding) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for position := range left {
+		if left[position] != right[position] {
+			return false
+		}
+	}
+	return true
 }
 
 // StatementCache stores immutable compiled statement shapes by canonical key.

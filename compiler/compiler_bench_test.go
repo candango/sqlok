@@ -162,9 +162,9 @@ func BenchmarkCompileCachedHit(b *testing.B) {
 }
 
 // BenchmarkASTCompileCachedShape measures the current prepared-plan path after
-// the statement shape and bind layout have already been prepared. The argument
-// buffer is populated on every iteration. Bind currently validates argument
-// count and returns the already ordered argument slice.
+// the statement shape and bind layout have already been prepared. The legacy
+// positional argument buffer is selected on every iteration and Bind validates
+// its compatibility with the prepared layout.
 func BenchmarkASTCompileCachedShape(b *testing.B) {
 	shape, err := Prepare(
 		NewStatementCache(),

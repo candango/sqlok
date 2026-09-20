@@ -51,13 +51,14 @@ type CompiledStatement struct {
 }
 ```
 
-The exact public type remains open. Its behavior is not:
+The public shape is immutable after compilation. Its behavior is:
 
 - `SQL` contains placeholders, never interpolated runtime values;
-- `BindLayout` maps logical values to placeholder positions;
+- `BindLayout` maps explicit logical slots to placeholder positions;
 - current execution values are supplied separately;
-- binding order is deterministic;
-- the artifact can be validated before execution;
+- binding order is deterministic and validated before execution;
+- named slots use a shape-owned `ArgumentBuffer`, while legacy positional
+  layouts may continue to receive `[]any`;
 - the same shape can be reused with different values.
 
 For example, these calls share one shape:
@@ -645,7 +646,8 @@ Interpret the output conservatively:
 - a ring-inclusive warm-path result includes the disclosed argument-selection
   cost and must not be compared directly with a hoisted-argument result.
 
-The warm path is explicit:
+The warm path is explicit. A legacy positional layout can continue to use
+`[]any`; a named layout must address each logical slot explicitly:
 
 ```go
 shape, err := compiler.CompileShape(stmt)
@@ -653,12 +655,16 @@ if err != nil {
     return err
 }
 
-args, err := shape.Bind(currentArgs)
+args := shape.NewArgumentBuffer()
+if err := args.Set("user_id", currentUserID); err != nil {
+    return err
+}
+bound, err := shape.BindBuffer(args)
 if err != nil {
     return err
 }
 
-execute(shape.SQL(), args)
+execute(shape.SQL(), bound)
 ```
 
 For a registry-backed plan, `compiler.PlanRegistry` stores the shape under an

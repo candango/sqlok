@@ -89,7 +89,14 @@ func (f *shapeFingerprint) VisitBindParam(sst.BindParamNode) error {
 }
 
 func (f *shapeFingerprint) VisitParameterSlot(slot sst.ParameterSlotNode) error {
-	f.token("parameter-slot", strconv.Itoa(slot.Position()))
+	name := ""
+	if named, ok := slot.(sst.NamedParameterSlotNode); ok {
+		name = strings.TrimSpace(named.Name())
+		if name == "" {
+			return ErrEmptyParameterSlotName
+		}
+	}
+	f.token("parameter-slot", name, strconv.Itoa(slot.Position()))
 	return nil
 }
 

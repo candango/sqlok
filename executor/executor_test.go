@@ -85,6 +85,40 @@ func TestExecRejectsArgumentsBeforeCallingTarget(t *testing.T) {
 	assert.Zero(t, target.execCalls)
 }
 
+func TestExecRejectsInvalidNamedBindingBeforeCallingTarget(t *testing.T) {
+	plan, err := compiler.CompileShape(dql.Select(
+		sst.NewNamedParameterSlot("id"),
+		sst.NewNamedParameterSlot("tenant"),
+	))
+	assert.NoError(t, err)
+
+	args := plan.NewArgumentBuffer()
+	assert.NoError(t, args.Set("id", 42))
+
+	target := &recordingExecutor{}
+	_, err = Exec(context.Background(), target, plan, args)
+
+	assert.ErrorIs(t, err, compiler.ErrMissingBindSlot)
+	assert.Zero(t, target.execCalls)
+}
+
+func TestExecAcceptsNamedBindingBuffer(t *testing.T) {
+	plan, err := compiler.CompileShape(dql.Select(
+		sst.NewNamedParameterSlot("id"),
+	))
+	assert.NoError(t, err)
+
+	args := plan.NewArgumentBuffer()
+	assert.NoError(t, args.Set("id", 42))
+
+	target := &recordingExecutor{}
+	_, err = Exec(context.Background(), target, plan, args)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, target.execCalls)
+	assert.Equal(t, []any{42}, target.execArgs)
+}
+
 func TestExecRejectsNilTarget(t *testing.T) {
 	plan, err := compiler.CompileShape(dql.Select(sst.NewLiteral(1)))
 	assert.NoError(t, err)

@@ -322,3 +322,58 @@ func TestDeriveShapeKeyIgnoresBindValues(t *testing.T) {
 
 	assert.Equal(t, firstKey, secondKey)
 }
+
+func TestCompiledStatementBindsNamedSlotsInSQLOrder(t *testing.T) {
+	shape, err := CompileShape(dql.Select(
+		sst.NewNamedParameterSlot("id"),
+		sst.NewNamedParameterSlot("tenant"),
+	))
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT ?, ?", shape.SQL())
+	assert.Equal(t, []Binding{
+		{position: 0, kind: SlotParameter, source: "id"},
+		{position: 1, kind: SlotParameter, source: "tenant"},
+	}, shape.BindLayout())
+
+	buffer := shape.NewArgumentBuffer()
+	assert.NoError(t, buffer.Set("tenant", "acme"))
+	assert.NoError(t, buffer.Set("id", 42))
+
+	args, err := shape.BindBuffer(buffer)
+	assert.NoError(t, err)
+	assert.Equal(t, []any{42, "acme"}, args)
+}
+
+func TestCompiledStatementRejectsPositionalBindingForNamedSlots(t *testing.T) {
+	shape, err := CompileShape(dql.Select(
+		sst.NewNamedParameterSlot("first"),
+		sst.NewNamedParameterSlot("second"),
+	))
+	assert.NoError(t, err)
+
+	_, err = shape.Bind([]any{"wrong-first", "wrong-second"})
+	assert.ErrorIs(t, err, ErrSlotAddressedArgumentsRequired)
+}
+
+func TestArgumentBufferValidatesNamedSlotIdentity(t *testing.T) {
+	shape, err := CompileShape(dql.Select(
+		sst.NewNamedParameterSlot("id"),
+		sst.NewNamedParameterSlot("tenant"),
+	))
+	assert.NoError(t, err)
+
+	buffer := shape.NewArgumentBuffer()
+	assert.ErrorIs(t, buffer.Set("unknown", 1), ErrUnknownBindSlot)
+	assert.NoError(t, buffer.Set("id", 1))
+	assert.ErrorIs(t, buffer.Set("id", 2), ErrDuplicateBindSlot)
+
+	_, err = shape.BindBuffer(buffer)
+	assert.ErrorIs(t, err, ErrMissingBindSlot)
+
+	buffer.Reset()
+	assert.NoError(t, buffer.Set("id", 1))
+	assert.NoError(t, buffer.Set("tenant", "acme"))
+	args, err := shape.BindBuffer(buffer)
+	assert.NoError(t, err)
+	assert.Equal(t, []any{1, "acme"}, args)
+}

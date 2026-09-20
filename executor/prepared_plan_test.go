@@ -105,3 +105,68 @@ func TestPreparedPathReusesCachedShapeForEquivalentStatements(t *testing.T) {
 	assert.Equal(t, first.SQL(), second.SQL())
 	assert.Equal(t, 1, cache.Len())
 }
+
+func namedUsersByTenantStatement() sst.StatementNode {
+	return dql.Select(
+		sst.NewColumnRef("users", "id"),
+	).From(
+		sst.NewTableRef("users"),
+	).Where(
+		sst.And(
+			sst.Eq(
+				sst.NewColumnRef("users", "id"),
+				sst.NewNamedParameterSlot("user_id"),
+			),
+			sst.Eq(
+				sst.NewColumnRef("users", "tenant_id"),
+				sst.NewNamedParameterSlot("tenant_id"),
+			),
+		),
+	)
+}
+
+// TestNamedPreparedPlanRoundTripThroughCache proves the complete named-slot
+// path: shape preparation, cache reuse, plan publication, reusable argument
+// buffer binding, and executor dispatch across multiple runtime values.
+func TestNamedPreparedPlanRoundTripThroughCache(t *testing.T) {
+	cache, err := compiler.NewBoundedStatementCache(16)
+	assert.NoError(t, err)
+	dialect := dialect.NewDefaultDialect()
+
+	shape, err := compiler.Prepare(cache, namedUsersByTenantStatement(), dialect)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, cache.Len())
+
+	registry := compiler.NewPlanRegistry()
+	assert.NoError(t, registry.Put("users.by-tenant", shape))
+
+	args := shape.NewArgumentBuffer()
+	target := &recordingExecutor{}
+	preparedSQL := shape.SQL()
+
+	for _, values := range []struct {
+		userID int
+		tenant string
+	}{
+		{userID: 7, tenant: "acme"},
+		{userID: 99, tenant: "globex"},
+	} {
+		args.Reset()
+		assert.NoError(t, args.Set("tenant_id", values.tenant))
+		assert.NoError(t, args.Set("user_id", values.userID))
+
+		plan, found := registry.Get("users.by-tenant")
+		assert.True(t, found)
+		_, err = Query(context.Background(), target, plan, args)
+		assert.NoError(t, err)
+		assert.Equal(t, preparedSQL, target.querySQL)
+		assert.Equal(t, []any{values.userID, values.tenant}, target.queryArgs)
+	}
+
+	reused, err := compiler.Prepare(cache, namedUsersByTenantStatement(), dialect)
+	assert.NoError(t, err)
+	assert.Equal(t, shape.ShapeKey(), reused.ShapeKey())
+	assert.Equal(t, preparedSQL, reused.SQL())
+	assert.Equal(t, 1, cache.Len())
+	assert.Equal(t, 2, target.queryCalls)
+}

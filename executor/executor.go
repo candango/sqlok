@@ -21,18 +21,31 @@ type Executor interface {
 // ErrNilExecutor reports an execution attempt without a database handle.
 var ErrNilExecutor = errors.New("executor cannot be nil")
 
+func bind(plan compiler.CompiledStatement, input any) ([]any, error) {
+	switch args := input.(type) {
+	case nil:
+		return plan.Bind(nil)
+	case []any:
+		return plan.Bind(args)
+	case *compiler.ArgumentBuffer:
+		return plan.BindBuffer(args)
+	default:
+		return nil, fmt.Errorf("unsupported compiled statement arguments %T", input)
+	}
+}
+
 // Exec binds current values to a prepared SQL shape and executes it.
 func Exec(
 	ctx context.Context,
 	target Executor,
 	plan compiler.CompiledStatement,
-	args []any,
+	input any,
 ) (sql.Result, error) {
 	if target == nil {
 		return nil, ErrNilExecutor
 	}
 
-	boundArgs, err := plan.Bind(args)
+	boundArgs, err := bind(plan, input)
 	if err != nil {
 		return nil, fmt.Errorf("bind compiled statement: %w", err)
 	}
@@ -44,13 +57,13 @@ func Query(
 	ctx context.Context,
 	target Executor,
 	plan compiler.CompiledStatement,
-	args []any,
+	input any,
 ) (*sql.Rows, error) {
 	if target == nil {
 		return nil, ErrNilExecutor
 	}
 
-	boundArgs, err := plan.Bind(args)
+	boundArgs, err := bind(plan, input)
 	if err != nil {
 		return nil, fmt.Errorf("bind compiled statement: %w", err)
 	}

@@ -104,14 +104,20 @@ func (c *Compiler) VisitBindParam(param sst.BindParamNode) error {
 
 // VisitParameterSlot reserves a runtime position without requiring a value.
 func (c *Compiler) VisitParameterSlot(slot sst.ParameterSlotNode) error {
-	if slot.Position() != len(c.bindings) {
+	source := ""
+	if named, ok := slot.(sst.NamedParameterSlotNode); ok {
+		source = strings.TrimSpace(named.Name())
+		if source == "" {
+			return ErrEmptyParameterSlotName
+		}
+	} else if slot.Position() != len(c.bindings) {
 		return fmt.Errorf(
 			"parameter slot expects position %d, got %d",
 			len(c.bindings),
 			slot.Position(),
 		)
 	}
-	return c.reserve(SlotParameter, nil, false)
+	return c.reserveWithSource(SlotParameter, nil, false, source)
 }
 
 // VisitExpressionGroupStart renders the opening parenthesis of a grouped
@@ -253,9 +259,22 @@ func (c *Compiler) bind(kind SlotKind, value any) error {
 }
 
 func (c *Compiler) reserve(kind SlotKind, value any, hasValue bool) error {
+	return c.reserveWithSource(kind, value, hasValue, "")
+}
+
+func (c *Compiler) reserveWithSource(
+	kind SlotKind,
+	value any,
+	hasValue bool,
+	source string,
+) error {
 	position := len(c.bindings)
 	c.parts = append(c.parts, c.dialect.Placeholder(position))
-	c.bindings = append(c.bindings, Binding{position: position, kind: kind})
+	c.bindings = append(c.bindings, Binding{
+		position: position,
+		kind:     kind,
+		source:   source,
+	})
 	if hasValue {
 		c.args = append(c.args, value)
 	}

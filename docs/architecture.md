@@ -328,10 +328,12 @@ type CompiledStatement struct {
 }
 ```
 
-`SQL` contains placeholders. `BindLayout` maps logical values from a builder or
-model to placeholder positions. A binding may identify an expression slot, a
-model field path, or a row/column position for a multi-row INSERT. The exact
-public type remains open, but the boundary must preserve these properties:
+`SQL` contains placeholders. `BindLayout` maps explicit logical slots from a
+builder or model to placeholder positions. A binding may identify an
+expression slot, a model field path, or a row/column position for a multi-row
+INSERT. Prepared shapes address named slots through a shape-owned argument
+buffer; legacy positional layouts remain supported. The boundary must
+preserve these properties:
 
 - the SQL template contains no runtime values;
 - the current call creates or supplies the `args` slice separately;

@@ -72,6 +72,15 @@ type ParameterSlotNode interface {
 	Position() int
 }
 
+// NamedParameterSlotNode represents a runtime slot with explicit logical
+// identity. Its name is used to address the value during prepared binding.
+type NamedParameterSlotNode interface {
+	ParameterSlotNode
+
+	// Name returns the logical identity of the runtime slot.
+	Name() string
+}
+
 // BinaryExpression represents a comparison between two expressions.
 type BinaryExpression struct {
 	left  ExpressionNode
@@ -336,6 +345,20 @@ func NewParameterSlot(position int) *ParameterSlot {
 	return &ParameterSlot{position: position}
 }
 
+// NamedParameterSlot represents a runtime slot addressed by logical name
+// rather than by its SQL position.
+type NamedParameterSlot struct {
+	name string
+}
+
+var _ NamedParameterSlotNode = (*NamedParameterSlot)(nil)
+
+// NewNamedParameterSlot creates a runtime parameter slot addressed by its
+// logical name rather than by its SQL position.
+func NewNamedParameterSlot(name string) *NamedParameterSlot {
+	return &NamedParameterSlot{name: name}
+}
+
 // Accept dispatches the parameter slot to its dedicated visitor method.
 func (p *ParameterSlot) Accept(v Visitor) error {
 	return v.VisitParameterSlot(p)
@@ -345,6 +368,21 @@ func (p *ParameterSlot) Accept(v Visitor) error {
 // slot.
 func (p *ParameterSlot) Position() int {
 	return p.position
+}
+
+// Accept dispatches the named parameter slot to the provided visitor.
+func (p *NamedParameterSlot) Accept(v Visitor) error {
+	return v.VisitParameterSlot(p)
+}
+
+// Position returns -1 because the SQL position is assigned during traversal.
+func (p *NamedParameterSlot) Position() int {
+	return -1
+}
+
+// Name returns the logical identity of the named runtime slot.
+func (p *NamedParameterSlot) Name() string {
+	return p.name
 }
 
 // Literal represents an expression rendered directly as SQL text.
