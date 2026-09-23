@@ -152,20 +152,14 @@ func TestSession_Load(t *testing.T) {
 		comp := &TestCompositeUser{OrgId: 1, UserId: 200, Name: "Comp User"}
 		assert.NoError(t, s.Add(comp))
 
-		mapper, mapperErr := NewMapper[TestCompositeUser]()
-		assert.NoError(t, mapperErr)
-		identity, present, keyErr := mapper.PrimaryKey(comp)
-		assert.NoError(t, keyErr)
-		assert.True(t, present)
-
-		loaded, err := Load[TestCompositeUser](s, identity)
+		loaded, err := Load[TestCompositeUser](s, CompositeKey{1, 200})
 		assert.NoError(t, err)
 		assert.Equal(t, comp, loaded)
 	})
 
 	t.Run("Should return nil when object not in session", func(t *testing.T) {
 		loaded, err := Load[TestUser](s, 999)
-		assert.NoError(t, err)
+		assert.ErrorIs(t, err, ErrNilSessionDatabase)
 		assert.Nil(t, loaded)
 	})
 }
