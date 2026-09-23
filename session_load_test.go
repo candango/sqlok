@@ -216,6 +216,42 @@ func TestSessionLoadContextHandlesMissingAndInvalidRows(t *testing.T) {
 	})
 }
 
+func TestSessionLoadContextReusesPointerIdentity(t *testing.T) {
+	db := newSessionTestDB(t, sessionTestResponse{
+		columns: []string{"id", "name"},
+		rows:    [][]driver.Value{{int64(0), "Zero"}},
+	})
+	session := NewSession(db)
+
+	first, err := LoadContext[TestPointerUser](context.Background(), session, 0)
+	if !assert.NoError(t, err) {
+		return
+	}
+	if !assert.NotNil(t, first.Id) {
+		return
+	}
+	assert.Zero(t, *first.Id)
+
+	second, err := LoadContext[TestPointerUser](context.Background(), session, 0)
+	assert.NoError(t, err)
+	assert.Same(t, first, second)
+	assert.Len(t, sessionTestQueries(), 1)
+}
+
+func TestSessionLoadContextRejectsMappingFailureWithoutState(t *testing.T) {
+	db := newSessionTestDB(t, sessionTestResponse{
+		columns: []string{"id", "name"},
+		rows:    [][]driver.Value{{"not-an-id", "Ana"}},
+	})
+	session := NewSession(db)
+
+	loaded, err := LoadContext[TestUser](context.Background(), session, 7)
+	assert.Error(t, err)
+	assert.Nil(t, loaded)
+	assert.Empty(t, session.identityMap)
+	assert.Empty(t, session.snapshots)
+}
+
 func TestSessionLoadContextBindsCompositeKeyInDeclarationOrder(t *testing.T) {
 	db := newSessionTestDB(t, sessionTestResponse{
 		columns: []string{"org_id", "user_id", "name"},
@@ -247,4 +283,13 @@ func TestSessionLoadContextBindsCompositeKeyInDeclarationOrder(t *testing.T) {
 		{Ordinal: 2, Value: int64(200)},
 		{Ordinal: 3, Value: int64(1)},
 	}, queries[0].args)
+
+	second, err := LoadContext[TestCompositeUser](
+		context.Background(),
+		session,
+		CompositeKey{1, 200},
+	)
+	assert.NoError(t, err)
+	assert.Same(t, loaded, second)
+	assert.Len(t, sessionTestQueries(), 1)
 }
