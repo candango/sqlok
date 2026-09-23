@@ -20,10 +20,11 @@ type sessionTestBinaryUser struct {
 }
 
 type sessionTestResponse struct {
-	columns  []string
-	rows     [][]driver.Value
-	queryErr error
-	execErr  error
+	columns          []string
+	rows             [][]driver.Value
+	queryErr         error
+	execErr          error
+	disableRecording bool
 }
 
 type sessionTestExec struct {
@@ -81,10 +82,12 @@ func (sessionTestConn) ExecContext(
 ) (driver.Result, error) {
 	sessionTestDatabase.Lock()
 	response := sessionTestDatabase.response
-	sessionTestDatabase.execs = append(sessionTestDatabase.execs, sessionTestExec{
-		query: query,
-		args:  append([]driver.NamedValue(nil), args...),
-	})
+	if !response.disableRecording {
+		sessionTestDatabase.execs = append(sessionTestDatabase.execs, sessionTestExec{
+			query: query,
+			args:  append([]driver.NamedValue(nil), args...),
+		})
+	}
 	sessionTestDatabase.Unlock()
 	if response.execErr != nil {
 		return nil, response.execErr
@@ -99,10 +102,12 @@ func (sessionTestConn) QueryContext(
 ) (driver.Rows, error) {
 	sessionTestDatabase.Lock()
 	response := sessionTestDatabase.response
-	sessionTestDatabase.queries = append(sessionTestDatabase.queries, sessionTestQuery{
-		query: query,
-		args:  append([]driver.NamedValue(nil), args...),
-	})
+	if !response.disableRecording {
+		sessionTestDatabase.queries = append(sessionTestDatabase.queries, sessionTestQuery{
+			query: query,
+			args:  append([]driver.NamedValue(nil), args...),
+		})
+	}
 	sessionTestDatabase.Unlock()
 	if response.queryErr != nil {
 		return nil, response.queryErr

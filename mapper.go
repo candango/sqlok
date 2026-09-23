@@ -153,10 +153,20 @@ func mapperDescriptorFor(typ reflect.Type) (*mapperDescriptor, error) {
 	if typ == nil || typ.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("%w: got %v", ErrMapperType, typ)
 	}
+	if actual, found := mapperDescriptors.Load(typ); found {
+		entry := actual.(*descriptorEntry)
+		return initializeMapperDescriptor(entry, typ)
+	}
 
 	candidate := &descriptorEntry{}
 	actual, _ := mapperDescriptors.LoadOrStore(typ, candidate)
-	entry := actual.(*descriptorEntry)
+	return initializeMapperDescriptor(actual.(*descriptorEntry), typ)
+}
+
+func initializeMapperDescriptor(
+	entry *descriptorEntry,
+	typ reflect.Type,
+) (*mapperDescriptor, error) {
 	entry.once.Do(func() {
 		entry.descriptor, entry.err = buildMapperDescriptor(typ)
 	})

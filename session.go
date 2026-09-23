@@ -164,7 +164,7 @@ func LoadContext[T any](ctx context.Context, s *Session, id any) (*T, error) {
 	if err != nil {
 		return nil, fmt.Errorf("map loaded entity %s: %w", entityType, err)
 	}
-	identity, primaryValues, err := descriptor.loadIdentity(id)
+	identity, err := descriptor.loadIdentity(id)
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +175,10 @@ func LoadContext[T any](ctx context.Context, s *Session, id any) (*T, error) {
 	}
 	if s.db == nil {
 		return nil, ErrNilSessionDatabase
+	}
+	primaryValues, err := descriptor.loadPrimaryValues(id)
+	if err != nil {
+		return nil, err
 	}
 
 	plan, err := s.loadPlan(descriptor)
@@ -649,28 +653,38 @@ func mappedValuesDirty(
 	return false
 }
 
-func (d *mapperDescriptor) loadIdentity(id any) (any, []any, error) {
+func (d *mapperDescriptor) loadIdentity(id any) (any, error) {
 	if len(d.primaryFields) == 0 {
-		return nil, nil, fmt.Errorf("%w: %s", ErrNoPrimaryKey, d.typ)
+		return nil, fmt.Errorf("%w: %s", ErrNoPrimaryKey, d.typ)
 	}
 	if len(d.primaryFields) == 1 {
 		if id == nil || !reflect.TypeOf(id).Comparable() {
-			return nil, nil, fmt.Errorf("invalid session load identity %T", id)
+			return nil, fmt.Errorf("invalid session load identity %T", id)
 		}
-		return id, []any{id}, nil
+		return id, nil
 	}
 
+	values, err := d.loadPrimaryValues(id)
+	if err != nil {
+		return nil, err
+	}
+	return encodeCompositeKey(values), nil
+}
+
+func (d *mapperDescriptor) loadPrimaryValues(id any) ([]any, error) {
+	if len(d.primaryFields) == 1 {
+		return []any{id}, nil
+	}
 	values, ok := id.(CompositeKey)
 	if !ok || len(values) != len(d.primaryFields) {
-		return nil, nil, fmt.Errorf("%w: got %T", ErrCompositeLoadKey, id)
+		return nil, fmt.Errorf("%w: got %T", ErrCompositeLoadKey, id)
 	}
 	for _, value := range values {
 		if value == nil || !reflect.TypeOf(value).Comparable() {
-			return nil, nil, fmt.Errorf("%w: component %T", ErrCompositeLoadKey, value)
+			return nil, fmt.Errorf("%w: component %T", ErrCompositeLoadKey, value)
 		}
 	}
-	identityValues := append([]any(nil), values...)
-	return encodeCompositeKey(identityValues), identityValues, nil
+	return append([]any(nil), values...), nil
 }
 
 func loadSlotName(position int) string {
