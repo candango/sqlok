@@ -532,6 +532,19 @@ func (m *Mapper[T]) extractValues(entity *T, values []MappedValue) []MappedValue
 	return values
 }
 
+// mappedValues is the descriptor-owned reflection path used when the entity
+// type is known only at runtime, such as Session.Flush.
+func (d *mapperDescriptor) mappedValues(root reflect.Value) []MappedValue {
+	values := append([]MappedValue(nil), d.valueTemplate...)
+	for position, field := range d.fields {
+		value, present := readableMappedField(root, field)
+		if present {
+			values[position].Value = value.Interface()
+		}
+	}
+	return values
+}
+
 // PrimaryKey returns the entity identity and whether every primary-key field
 // is present. Non-pointer zero values are treated as absent; pointer zero
 // values are present when the pointer is non-nil.
