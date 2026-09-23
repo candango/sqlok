@@ -300,20 +300,24 @@ Session must consume Mapper metadata rather than repeat reflection for primary
 keys or field traversal. A Session may use shared `StatementCache` and
 `PlanRegistry` instances, but it does not own process-wide compiled artifacts.
 
-The first ORM milestone is deliberately narrow:
+The implemented ORM slice is deliberately narrow:
 
 ```text
-Session.Load
+LoadContext[T]
   → Identity Map lookup
   → prepared SELECT on miss
   → Executor.Query
   → Mapper.Scan
-  → Identity Map registration
+  → Identity Map registration and snapshot
   → return the same pointer on later loads
+
+Session.Flush(ctx, tx)
+  → INSERT pending entities
+  → UPDATE dirty tracked entities
+  → refresh snapshots after successful statements
 ```
 
-Only after that path works end to end should `Session.Flush` add INSERTs for
-pending entities and UPDATEs for dirty persistent entities.
+The caller owns `tx`; Session never begins, commits, or rolls back it.
 
 ## Research basis
 
@@ -361,13 +365,12 @@ sst/        statement roots, clauses, expressions, and visitor contracts
 compiler/   validation, rendering, shape identity, caches, and prepared plans
 dialect/    rendering contract and default question-mark implementation
 executor/   database/sql-compatible execution boundary
-session.go  early public Identity Map and pending-entity state
+mapper.go   public struct metadata, scanning, and values
+session.go  public Identity Map, Load, snapshots, and Flush
 ```
 
-The legacy string builder and schema loader remain under `internal/`. The next
-ORM component is a Mapper; its final exported location should be chosen only
-after its metadata and row-scanning contract are proven. DDL remains future
-scope.
+The legacy string builder and schema loader remain under `internal/`. DDL
+remains future scope.
 
 The package boundary is behavioral:
 

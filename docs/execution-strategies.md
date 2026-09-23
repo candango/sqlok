@@ -220,19 +220,25 @@ A Session is not responsible for owning the global compiled-statement cache.
 The cache can be shared across Sessions, while identity and transaction state
 remain scoped to the current Session/request.
 
-The first ORM acceptance path is:
+The implemented ORM path is:
 
 ```text
-Session.Load(id)
+LoadContext[T](ctx, session, id)
   → return tracked pointer on Identity Map hit
   → on miss, execute one prepared SELECT
   → map one row through Mapper
   → register and snapshot the entity
   → return that same pointer on subsequent loads
+
+session.Flush(ctx, tx)
+  → INSERT pending entities through caller-owned tx
+  → UPDATE dirty tracked entities through caller-owned tx
+  → refresh snapshots only after every statement succeeds
 ```
 
-Only after this path passes end to end should Flush add INSERT handling for
-pending entities and UPDATE handling for dirty persistent entities.
+`Flush` never begins, commits, or rolls back a transaction. The caller owns
+that boundary and should discard a Session after rolling back a successful
+flush, because Session state cannot observe an external rollback.
 
 The Session path is valuable for domain productivity and consistency. It is
 not the default recommendation for the hottest performance-sensitive query.
@@ -268,6 +274,14 @@ The current compiler POC isolates the application-side construction and
 compilation cost. It intentionally excludes Session, network, driver, and
 server-side query planning so the cache's local benefit can be measured before
 those variables are introduced.
+
+The ORM suite adds a fake-driver benchmark that excludes network and server
+latency. On Go 1.27.0 / Ryzen 5 1600 (`-benchtime=1s -count=10`, `benchstat`),
+Identity Map hits measure 79.32 ns/op with zero allocations; prepared Load
+misses measure 7.506 us/op, 1.713 KiB/op, and 30 allocs/op; pending Flush
+measures 4.950 us/op, 1.195 KiB/op, and 23 allocs/op; dirty Flush measures
+6.440 us/op, 1.258 KiB/op, and 24 allocs/op. Those latter paths include local
+driver, plan, mapping, and snapshot work and are not database-latency claims.
 
 ## Design rule
 

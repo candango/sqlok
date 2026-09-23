@@ -13,10 +13,9 @@ is not a feature-for-feature Python port.
 
 The implemented engine provides SQL Semantic Tree (SST) statement roots, a
 dialect-aware compiler, immutable compiled plans, and driver-agnostic execution
-on top of `database/sql`. The public root package currently exposes an early
-Session and identity-map foundation. Result mapping, database-backed Session
-loading, Unit-of-Work flushing, and the cohesive model-oriented facade are the
-next ORM milestones.
+on top of `database/sql`. The public root package exposes a stateless Mapper
+and a Session Unit of Work with Identity Map reuse, database-backed loading,
+and explicit transactional flushing.
 
 ## Features
 
@@ -24,7 +23,7 @@ next ORM milestones.
 - **Compiler** - Structural validation, bind layouts, shape identities, and SQL rendering
 - **Compiled Plans** - Bounded statement cache and stable `PlanRegistry` warm path
 - **Driver-Agnostic Execution** - `database/sql`-compatible executor boundary
-- **Session Foundation** - Identity Map and pending-entity tracking in the root package
+- **Mapper and Session** - Struct mapping, Identity Map reuse, prepared loads, and explicit flushes
 - **Schema Management** - Internal table, field, and foreign-key definitions
 - **Legacy Query Builder** - Internal fluent string builder pending consolidation
 - **CLI Interface** - Schema inspection and example-generation commands
@@ -42,23 +41,57 @@ go get github.com/candango/sqlok
 
 ## Quick Start
 
-### Current public API
+### Mapper and Session
 
-The root package currently exposes the session and identity-map foundation:
+Map an entity with `sqlok` tags, load it through a Session, and flush changes
+through an application-owned transaction. Ordinary application code does not
+need to construct compiler plans or bind buffers.
 
 ```go
 package main
 
 import (
+  "context"
   "database/sql"
+
   sqlok "github.com/candango/sqlok"
 )
 
-func track(db *sql.DB, user *User) error {
+type User struct {
+  ID   int    `sqlok:"column=id,pk"`
+  Name string `sqlok:"column=name"`
+}
+
+func (*User) TableName() string { return "users" }
+
+func rename(ctx context.Context, db *sql.DB, id int, name string) error {
   session := sqlok.NewSession(db)
-  return session.Add(user)
+  user, err := sqlok.LoadContext[User](ctx, session, id)
+  if err != nil {
+    return err
+  }
+  if user == nil {
+    return sql.ErrNoRows
+  }
+
+  tx, err := db.BeginTx(ctx, nil)
+  if err != nil {
+    return err
+  }
+  defer tx.Rollback()
+
+  user.Name = name
+  if err := session.Flush(ctx, tx); err != nil {
+    return err
+  }
+  return tx.Commit()
 }
 ```
+
+`LoadContext` returns the already-tracked pointer on an Identity Map hit.
+Composite loads use `sqlok.CompositeKey` in primary-field declaration order.
+`Flush` never starts, commits, or rolls back a transaction; if the caller rolls
+one back after a successful flush, discard that Session before retrying.
 
 The legacy query builder and schema loader are repository-internal today. Their
 API is being migrated toward the SELECT SST/compiler path before becoming part
@@ -114,7 +147,8 @@ schema loader is currently internal and uses `database/sql`.
 
 - **`executor/`** - Driver-agnostic execution of compiled plans
 
-- **`session.go`** - Public session and identity-map foundation
+- **`mapper.go`** - Public stateless struct metadata, scanning, and values
+- **`session.go`** - Public Session loading, Identity Map, and explicit flushing
 
 - **`internal/schema/`** - Internal schema definitions
   - `Table` - Represents a database table
@@ -126,10 +160,6 @@ schema loader is currently internal and uses `database/sql`.
   - `database.go` - Database operations
   - `init.go` - Schema initialization
   - `example.go` - Example code generation
-
-- **Mapper** - Next ORM layer; no implementation exists yet. It will own
-  struct metadata, primary-key metadata, column-to-field mapping, row scanning,
-  and deterministic value extraction without owning Session state.
 
 - **`internal/namefmt.go`** - Name formatting utilities
 
@@ -167,7 +197,8 @@ GitHub Actions automatically tests against:
 │   ├── schema/         # Internal schema definitions
 │   ├── cli/            # CLI commands
 │   └── sqlok.go        # Internal database loading
-├── session.go          # Early public Session and Identity Map
+├── mapper.go           # Public Mapper metadata and row mapping
+├── session.go          # Public Session, Identity Map, Load, and Flush
 ├── dummy/              # Example models and tests
 ├── scripts/postgres/   # Database setup scripts
 └── makefile            # Build targets
@@ -197,13 +228,7 @@ make test
 
 ## Roadmap
 
-1. Implement a stateless Mapper for metadata, row scanning, primary keys, and
-   deterministic field/value extraction.
-2. Refactor Session to consume Mapper metadata instead of performing its own
-   reflection.
-3. Complete database-backed `Session.Load`: prepared SELECT, row mapping, and
-   Identity Map registration/reuse.
-4. Implement explicit Unit-of-Work flushing for pending and dirty entities.
-5. Deliver the cohesive model-oriented ORM API: expressive queries, automatic
-   mapping, Session identity, and Flush without exposing engine plumbing.
-6. Add vendor dialect adapters outside the driver-agnostic core as needed.
+1. Extend the cohesive model-oriented ORM API with richer query ergonomics.
+2. Add relationship loading, cascades, and lifecycle features only when their
+   behavior has a concrete application consumer.
+3. Add vendor dialect adapters outside the driver-agnostic core as needed.
