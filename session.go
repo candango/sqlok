@@ -48,6 +48,12 @@ var (
 
 	// ErrPrimaryKeyMutation reports a tracked object whose identity changed.
 	ErrPrimaryKeyMutation = errors.New("tracked entity primary key changed")
+
+	// ErrGeneratedKeyUnsupported reports a pending insert whose generated
+	// primary key cannot be read from the executor result.
+	ErrGeneratedKeyUnsupported = errors.New(
+		"generated primary key is unsupported by the executor",
+	)
 )
 
 // CompositeKey supplies primary-key values in mapper declaration order for a
@@ -121,23 +127,36 @@ func (s *Session) Add(ent any) error {
 		return nil
 	}
 
-	if s.identityMap[entityType] == nil {
-		s.identityMap[entityType] = make(map[any]any)
+	if err := s.registerIdentity(ent, entityType, identity); err != nil {
+		return err
 	}
-	if existing, exists := s.identityMap[entityType][identity]; exists {
-		if existing != ent {
-			return ErrIdentityConflict
-		}
-		return nil
-	}
-
-	s.identityMap[entityType][identity] = ent
 	if s.snapshots == nil {
 		s.snapshots = make(map[any]map[string]fieldSnapshot)
 	}
 	s.snapshots[ent] = snapshotMappedValues(
 		descriptor.mappedValues(value.Elem()),
 	)
+	return nil
+}
+
+func (s *Session) registerIdentity(
+	entity any,
+	entityType reflect.Type,
+	identity any,
+) error {
+	if s.identityMap == nil {
+		s.identityMap = make(map[reflect.Type]map[any]any)
+	}
+	if s.identityMap[entityType] == nil {
+		s.identityMap[entityType] = make(map[any]any)
+	}
+	if existing, exists := s.identityMap[entityType][identity]; exists {
+		if existing != entity {
+			return ErrIdentityConflict
+		}
+		return nil
+	}
+	s.identityMap[entityType][identity] = entity
 	return nil
 }
 
@@ -340,6 +359,9 @@ func (s *Session) Flush(ctx context.Context, tx *sql.Tx) error {
 	if err != nil {
 		return err
 	}
+	if err := s.registerPendingEntities(); err != nil {
+		return err
+	}
 
 	if len(s.pending) > 0 {
 		s.pending = nil
@@ -356,11 +378,20 @@ func (s *Session) Flush(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
+type pendingInsert struct {
+	entity      any
+	descriptor  *mapperDescriptor
+	root        reflect.Value
+	generatedID int64
+	generated   bool
+}
+
 func (s *Session) flushPending(
 	ctx context.Context,
 	tx *sql.Tx,
 ) (map[any]map[string]fieldSnapshot, error) {
 	snapshots := make(map[any]map[string]fieldSnapshot, len(s.pending))
+	inserts := make([]pendingInsert, 0, len(s.pending))
 	for _, entity := range s.pending {
 		descriptor, root, err := mapperDescriptorForEntity(entity)
 		if err != nil {
@@ -371,6 +402,13 @@ func (s *Session) flushPending(
 			return nil, fmt.Errorf("read pending entity primary key: %w", keyErr)
 		}
 		includePrimary := keyErr == nil && present
+		generated := !includePrimary && len(descriptor.primaryFields) > 0
+		if generated {
+			if err := validateGeneratedPrimaryKey(descriptor); err != nil {
+				return nil, fmt.Errorf("validate pending session entity: %w", err)
+			}
+		}
+
 		values := descriptor.mappedValues(root)
 		plan, err := s.insertPlan(descriptor, includePrimary)
 		if err != nil {
@@ -380,12 +418,79 @@ func (s *Session) flushPending(
 		if err != nil {
 			return nil, err
 		}
-		if _, err := executor.Exec(ctx, tx, plan, arguments); err != nil {
+		result, err := executor.Exec(ctx, tx, plan, arguments)
+		if err != nil {
 			return nil, fmt.Errorf("insert pending session entity: %w", err)
 		}
-		snapshots[entity] = snapshotMappedValues(values)
+
+		insert := pendingInsert{
+			entity:     entity,
+			descriptor: descriptor,
+			root:       root,
+			generated:  generated,
+		}
+		if generated {
+			if result == nil {
+				return nil, fmt.Errorf(
+					"read generated primary key for %s: %w",
+					descriptor.typ,
+					ErrGeneratedKeyUnsupported,
+				)
+			}
+			insert.generatedID, err = result.LastInsertId()
+			if err != nil {
+				return nil, fmt.Errorf(
+					"read generated primary key for %s: %w: %v",
+					descriptor.typ,
+					ErrGeneratedKeyUnsupported,
+					err,
+				)
+			}
+		}
+		inserts = append(inserts, insert)
+	}
+
+	for _, insert := range inserts {
+		if insert.generated {
+			field := insert.descriptor.fields[insert.descriptor.primaryFields[0]]
+			if err := assignGeneratedPrimaryKey(
+				insert.root,
+				field,
+				insert.generatedID,
+			); err != nil {
+				return nil, fmt.Errorf(
+					"assign generated primary key for %s: %w",
+					insert.descriptor.typ,
+					err,
+				)
+			}
+		}
+
+		snapshots[insert.entity] = snapshotMappedValues(
+			insert.descriptor.mappedValues(insert.root),
+		)
 	}
 	return snapshots, nil
+}
+
+func (s *Session) registerPendingEntities() error {
+	for _, entity := range s.pending {
+		descriptor, root, err := mapperDescriptorForEntity(entity)
+		if err != nil {
+			return fmt.Errorf("map inserted session entity: %w", err)
+		}
+		identity, present, err := descriptor.primaryKey(root)
+		if err != nil && !errors.Is(err, ErrNoPrimaryKey) {
+			return fmt.Errorf("read inserted entity primary key: %w", err)
+		}
+		if !present {
+			continue
+		}
+		if err := s.registerIdentity(entity, descriptor.typ, identity); err != nil {
+			return fmt.Errorf("register inserted entity: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Session) flushDirty(

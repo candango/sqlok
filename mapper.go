@@ -568,6 +568,82 @@ func (m *Mapper[T]) PrimaryKey(entity *T) (any, bool, error) {
 	return m.descriptor.primaryKey(reflect.ValueOf(entity).Elem())
 }
 
+func validateGeneratedPrimaryKey(d *mapperDescriptor) error {
+	if len(d.primaryFields) != 1 {
+		return fmt.Errorf(
+			"%w: generated keys require exactly one primary-key field",
+			ErrGeneratedKeyUnsupported,
+		)
+	}
+
+	typ := d.fields[d.primaryFields[0]].typ
+	for typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	switch typ.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Uintptr:
+		return nil
+	default:
+		return fmt.Errorf(
+			"%w: primary-key field %q has unsupported type %s",
+			ErrGeneratedKeyUnsupported,
+			d.fields[d.primaryFields[0]].column,
+			typ,
+		)
+	}
+}
+
+func assignGeneratedPrimaryKey(
+	root reflect.Value,
+	field mappedField,
+	id int64,
+) error {
+	value, err := writableMappedField(root, field)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrGeneratedKeyUnsupported, err)
+	}
+	for value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			value.Set(reflect.New(value.Type().Elem()))
+		}
+		value = value.Elem()
+	}
+
+	switch value.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if value.OverflowInt(id) {
+			return fmt.Errorf(
+				"%w: generated value %d overflows %s",
+				ErrGeneratedKeyUnsupported,
+				id,
+				value.Type(),
+			)
+		}
+		value.SetInt(id)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Uintptr:
+		if id < 0 || value.OverflowUint(uint64(id)) {
+			return fmt.Errorf(
+				"%w: generated value %d overflows %s",
+				ErrGeneratedKeyUnsupported,
+				id,
+				value.Type(),
+			)
+		}
+		value.SetUint(uint64(id))
+	default:
+		return fmt.Errorf(
+			"%w: primary-key field %q has unsupported type %s",
+			ErrGeneratedKeyUnsupported,
+			field.column,
+			value.Type(),
+		)
+	}
+	return nil
+}
+
 func (d *mapperDescriptor) primaryKey(root reflect.Value) (any, bool, error) {
 	if len(d.primaryFields) == 0 {
 		return nil, false, fmt.Errorf("%w: %s", ErrNoPrimaryKey, d.typ)

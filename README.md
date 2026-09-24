@@ -23,7 +23,7 @@ and explicit transactional flushing.
 - **Compiler** - Structural validation, bind layouts, shape identities, and SQL rendering
 - **Compiled Plans** - Bounded statement cache and stable `PlanRegistry` warm path
 - **Driver-Agnostic Execution** - `database/sql`-compatible executor boundary
-- **Mapper and Session** - Struct mapping, Identity Map reuse, prepared loads, and explicit flushes
+- **Mapper and Session** - Struct mapping, Identity Map reuse, prepared loads, explicit flushes, and numeric generated keys via `LastInsertId`
 - **Schema Management** - Internal table, field, and foreign-key definitions
 - **Legacy Query Builder** - Internal fluent string builder pending consolidation
 - **CLI Interface** - Schema inspection and example-generation commands

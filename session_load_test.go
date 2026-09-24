@@ -24,12 +24,27 @@ type sessionTestResponse struct {
 	rows             [][]driver.Value
 	queryErr         error
 	execErr          error
+	lastInsertID     int64
+	lastInsertErr    error
 	disableRecording bool
 }
 
 type sessionTestExec struct {
 	query string
 	args  []driver.NamedValue
+}
+
+type sessionTestResult struct {
+	id  int64
+	err error
+}
+
+func (r sessionTestResult) LastInsertId() (int64, error) {
+	return r.id, r.err
+}
+
+func (r sessionTestResult) RowsAffected() (int64, error) {
+	return 1, nil
 }
 
 type sessionTestQuery struct {
@@ -92,7 +107,10 @@ func (sessionTestConn) ExecContext(
 	if response.execErr != nil {
 		return nil, response.execErr
 	}
-	return driver.RowsAffected(1), nil
+	return sessionTestResult{
+		id:  response.lastInsertID,
+		err: response.lastInsertErr,
+	}, nil
 }
 
 func (sessionTestConn) QueryContext(
@@ -317,7 +335,7 @@ func TestSessionLoadContextRejectsMappingFailureWithoutState(t *testing.T) {
 
 func TestSessionFlushWritesPendingAndDirtyEntities(t *testing.T) {
 	t.Run("pending insert", func(t *testing.T) {
-		db := newSessionTestDB(t, sessionTestResponse{})
+		db := newSessionTestDB(t, sessionTestResponse{lastInsertID: 7})
 		session := NewSession(db)
 		user := &TestUser{Name: "Ana"}
 		assert.NoError(t, session.Add(user))
@@ -329,7 +347,12 @@ func TestSessionFlushWritesPendingAndDirtyEntities(t *testing.T) {
 		t.Cleanup(func() { _ = tx.Rollback() })
 		assert.NoError(t, session.Flush(context.Background(), tx))
 		assert.Empty(t, session.pending)
+		assert.Equal(t, 7, user.Id)
 		assert.Contains(t, session.snapshots, user)
+
+		loaded, loadErr := Load[TestUser](session, 7)
+		assert.NoError(t, loadErr)
+		assert.Same(t, user, loaded)
 
 		execs := sessionTestExecs()
 		if !assert.Len(t, execs, 1) {
@@ -337,6 +360,26 @@ func TestSessionFlushWritesPendingAndDirtyEntities(t *testing.T) {
 		}
 		assert.Equal(t, "INSERT INTO test_user (name) VALUES (?)", execs[0].query)
 		assert.Equal(t, []driver.NamedValue{{Ordinal: 1, Value: "Ana"}}, execs[0].args)
+	})
+
+	t.Run("generated key unsupported preserves pending state", func(t *testing.T) {
+		db := newSessionTestDB(t, sessionTestResponse{
+			lastInsertErr: errors.New("last insert id is unsupported"),
+		})
+		session := NewSession(db)
+		user := &TestUser{Name: "Ana"}
+		assert.NoError(t, session.Add(user))
+
+		tx, err := db.BeginTx(context.Background(), nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		t.Cleanup(func() { _ = tx.Rollback() })
+		err = session.Flush(context.Background(), tx)
+		assert.ErrorIs(t, err, ErrGeneratedKeyUnsupported)
+		assert.Contains(t, session.pending, user)
+		assert.Zero(t, user.Id)
+		assert.Empty(t, session.identityMap)
 	})
 
 	t.Run("dirty update", func(t *testing.T) {
