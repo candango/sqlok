@@ -1,5 +1,5 @@
 ---
-name: sqlok-sqlalchemy-api
+name: sqlok-expert
 description: Guide agents working on SQLok from developer-facing API design through implementation, testing, performance, and documentation. Use for any SQLok project task involving query construction, ORM/Session behavior, mapping, identity, AST/compiler/executor changes, or public API docs.
 ---
 

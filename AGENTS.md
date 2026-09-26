@@ -11,7 +11,7 @@
 
 - Start from the developer-facing SQLAlchemy-like usage and expected behavior, then define the public Go API, Session/result/mapping behavior, and only then implement the supporting AST/compiler/executor layers.
 - Do not let existing bottom-up internals dictate public ergonomics. `sst/dql.Select` is a low-level builder; the root `sqlok.Select` facade is the ORM read API.
-- Use `skills/sqlok-sqlalchemy-api/SKILL.md` as the SQLok agent playbook and implementation ledger. Mark unsupported behavior `WIP`; mark it implemented only when the public behavior is backed by code and relevant tests. Update the skill as implementation progresses.
+- Use `skills/sqlok-expert/SKILL.md` as the SQLok agent playbook and implementation ledger. Mark unsupported behavior `WIP`; mark it implemented only when the public behavior is backed by code and relevant tests. Update the skill as implementation progresses.
 - Treat performance as a non-regression requirement: measure relevant existing benchmarks before and after changes, preserve hot-path plan/metadata caching, and investigate material regressions before accepting the implementation. Do not claim performance gains or zero regression without reproducible measurements.
 
 ## SELECT AST guide mode
