@@ -663,6 +663,42 @@ func (d *mapperDescriptor) primaryKey(root reflect.Value) (any, bool, error) {
 	return encodeCompositeKey(values), true, nil
 }
 
+// loadedPrimaryKey reads identity from a database-scanned entity. Unlike
+// primaryKey, it treats zero values as present because the row supplied them.
+func (d *mapperDescriptor) loadedPrimaryKey(root reflect.Value) (any, bool, error) {
+	if len(d.primaryFields) == 0 {
+		return nil, false, nil
+	}
+
+	values := make([]any, len(d.primaryFields))
+	for position, fieldPosition := range d.primaryFields {
+		field := d.fields[fieldPosition]
+		value, present := readableMappedField(root, field)
+		if !present {
+			return nil, false, nil
+		}
+		for value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface {
+			if value.IsNil() {
+				return nil, false, nil
+			}
+			value = value.Elem()
+		}
+		identity := value.Interface()
+		if !reflect.TypeOf(identity).Comparable() {
+			return nil, false, fmt.Errorf(
+				"primary key column %q has non-comparable type %T",
+				field.column,
+				identity,
+			)
+		}
+		values[position] = identity
+	}
+	if len(values) == 1 {
+		return values[0], true, nil
+	}
+	return encodeCompositeKey(values), true, nil
+}
+
 func (d *mapperDescriptor) primaryKeyField(
 	root reflect.Value,
 	field mappedField,

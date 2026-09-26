@@ -29,20 +29,47 @@ func newSessionBenchmarkDB(b *testing.B, response sessionTestResponse) *sql.DB {
 	return db
 }
 
-func BenchmarkSessionIdentityMapHit(b *testing.B) {
-	session := NewSession(nil)
-	entity := &TestUser{TestUserBase: TestUserBase{Id: 7}, Name: "Ana"}
-	if err := session.Add(entity); err != nil {
-		b.Fatal(err)
-	}
+func BenchmarkSessionSelectPreparedMiss(b *testing.B) {
+	db := newSessionBenchmarkDB(b, sessionTestResponse{
+		columns:          []string{"id", "name"},
+		rows:             [][]driver.Value{{int64(7), "Ana"}},
+		disableRecording: true,
+	})
+	session := NewSession(db)
+	query := Select(TestUser{}).Where(Eq("id", 7))
+	entityType := reflect.TypeFor[TestUser]()
 
 	b.ReportAllocs()
 	for b.Loop() {
-		sessionBenchmarkEntity, sessionBenchmarkErr = Load[TestUser](session, 7)
+		entities, err := query.All(context.Background(), session)
+		sessionBenchmarkErr = err
+		if len(entities) > 0 {
+			sessionBenchmarkEntity = entities[0]
+		}
+		delete(session.identityMap, entityType)
+		delete(session.snapshots, sessionBenchmarkEntity)
 	}
 }
 
-func BenchmarkSessionLoadPreparedMiss(b *testing.B) {
+func BenchmarkSessionSelectOneOrNonePreparedMiss(b *testing.B) {
+	db := newSessionBenchmarkDB(b, sessionTestResponse{
+		columns:          []string{"id", "name"},
+		rows:             [][]driver.Value{{int64(7), "Ana"}},
+		disableRecording: true,
+	})
+	session := NewSession(db)
+	query := Select(TestUser{}).Where(Eq("id", 7))
+	entityType := reflect.TypeFor[TestUser]()
+
+	b.ReportAllocs()
+	for b.Loop() {
+		sessionBenchmarkEntity, sessionBenchmarkErr = query.OneOrNone(context.Background(), session)
+		delete(session.identityMap, entityType)
+		delete(session.snapshots, sessionBenchmarkEntity)
+	}
+}
+
+func BenchmarkSessionSelectBuildAndAll(b *testing.B) {
 	db := newSessionBenchmarkDB(b, sessionTestResponse{
 		columns:          []string{"id", "name"},
 		rows:             [][]driver.Value{{int64(7), "Ana"}},
@@ -50,14 +77,35 @@ func BenchmarkSessionLoadPreparedMiss(b *testing.B) {
 	})
 	session := NewSession(db)
 	entityType := reflect.TypeFor[TestUser]()
+	ctx := context.Background()
 
 	b.ReportAllocs()
 	for b.Loop() {
-		sessionBenchmarkEntity, sessionBenchmarkErr = LoadContext[TestUser](
-			context.Background(),
-			session,
-			7,
-		)
+		entities, err := Select(TestUser{}).Where(Eq("id", 7)).All(ctx, session)
+		sessionBenchmarkErr = err
+		if len(entities) > 0 {
+			sessionBenchmarkEntity = entities[0]
+		}
+		delete(session.identityMap, entityType)
+		delete(session.snapshots, sessionBenchmarkEntity)
+	}
+}
+
+func BenchmarkSessionSelectBuildAndOneOrNone(b *testing.B) {
+	db := newSessionBenchmarkDB(b, sessionTestResponse{
+		columns:          []string{"id", "name"},
+		rows:             [][]driver.Value{{int64(7), "Ana"}},
+		disableRecording: true,
+	})
+	session := NewSession(db)
+	entityType := reflect.TypeFor[TestUser]()
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	for b.Loop() {
+		sessionBenchmarkEntity, sessionBenchmarkErr = Select(TestUser{}).
+			Where(Eq("id", 7)).
+			OneOrNone(ctx, session)
 		delete(session.identityMap, entityType)
 		delete(session.snapshots, sessionBenchmarkEntity)
 	}

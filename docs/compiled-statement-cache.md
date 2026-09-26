@@ -742,11 +742,12 @@ are implemented. Remaining work is driven by the public ORM experience:
 1. Implement and cache stateless Mapper descriptors separately from SQL shapes.
 2. Refactor Session to consume Mapper metadata for primary keys and mapped
    values instead of repeating reflection.
-3. Prove database-backed `Session.Load` end to end: prepared plan, execution,
-   row mapping, Identity Map registration, and pointer reuse.
+3. Prove the typed `SelectQuery` path end to end: prepared-plan reuse,
+   execution, row mapping, Identity Map registration, and pointer reuse.
 4. Implement explicit Flush planning for pending and dirty entities.
-5. Expose a cohesive model-oriented API that hides compiler/cache/registry/bind
-   plumbing while retaining Core and direct SQL escape hatches.
+5. Extend the initial model-oriented SELECT facade with richer predicates,
+   projected results, and transaction-aware execution while retaining Core and
+   direct SQL escape hatches.
 6. Benchmark the complete ORM path against direct SQL, cold Core, and warm Core
    using equivalent statements and values.
 7. Consider database prepared-statement reuse, persistent artifacts, and warm-up

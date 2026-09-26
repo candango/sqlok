@@ -13,7 +13,6 @@ import (
 	"github.com/candango/sqlok/executor"
 	"github.com/candango/sqlok/sst"
 	"github.com/candango/sqlok/sst/dml"
-	"github.com/candango/sqlok/sst/dql"
 )
 
 var (
@@ -27,12 +26,6 @@ var (
 
 	// ErrNilSessionDatabase reports a database-backed operation without a DB.
 	ErrNilSessionDatabase = errors.New("session database cannot be nil")
-
-	// ErrNilLoadContext reports a database-backed load without a context.
-	ErrNilLoadContext = errors.New("session load context cannot be nil")
-
-	// ErrCompositeLoadKey reports an invalid composite identity supplied to Load.
-	ErrCompositeLoadKey = errors.New("composite load key must match mapper primary keys")
 
 	// ErrLoadedEntityWithoutPrimaryKey reports a database row that cannot be
 	// registered in the Identity Map.
@@ -56,20 +49,16 @@ var (
 	)
 )
 
-// CompositeKey supplies primary-key values in mapper declaration order for a
-// Load of an entity with more than one primary-key field.
-type CompositeKey []any
-
 // Session represents the Unit of Work. It tracks object states and
 // manages the identity of entities in memory.
 type Session struct {
 	// db is the underlying SQL database connection.
 	db *sql.DB
 
-	// loadCache and loadPlans hold Session-private prepared read plans. They
+	// readCache and readPlans hold Session-private prepared read plans. They
 	// keep compiler plumbing out of the ORM facade and do not own a global cache.
-	loadCache *compiler.StatementCache
-	loadPlans *compiler.PlanRegistry
+	readCache *compiler.StatementCache
+	readPlans *compiler.PlanRegistry
 
 	// flushCache and flushPlans hold Session-private prepared write plans.
 	flushCache *compiler.StatementCache
@@ -87,12 +76,12 @@ type Session struct {
 	pending []any
 }
 
-// NewSession initializes a new Unit of Work with empty state and private load plans.
+// NewSession initializes a new Unit of Work with empty state and private read/write plans.
 func NewSession(db *sql.DB) *Session {
 	return &Session{
 		db:          db,
-		loadCache:   compiler.NewStatementCache(),
-		loadPlans:   compiler.NewPlanRegistry(),
+		readCache:   compiler.NewStatementCache(),
+		readPlans:   compiler.NewPlanRegistry(),
 		flushCache:  compiler.NewStatementCache(),
 		flushPlans:  compiler.NewPlanRegistry(),
 		identityMap: make(map[reflect.Type]map[any]any),
@@ -160,182 +149,20 @@ func (s *Session) registerIdentity(
 	return nil
 }
 
-// Load retrieves an entity by primary key. It first returns the tracked
-// pointer from the Identity Map; on a miss it uses context.Background for a
-// prepared database query. Prefer LoadContext in request-scoped code.
-func Load[T any](s *Session, id any) (*T, error) {
-	return LoadContext[T](context.Background(), s, id)
-}
-
-// LoadContext retrieves an entity by primary key, querying the database on an
-// Identity Map miss. Composite identities use CompositeKey in mapper primary
-// field declaration order.
-func LoadContext[T any](ctx context.Context, s *Session, id any) (*T, error) {
-	if ctx == nil {
-		return nil, ErrNilLoadContext
+func (s *Session) registerLoadedEntity(
+	entity any,
+	entityType reflect.Type,
+	identity any,
+	values []MappedValue,
+) error {
+	if err := s.registerIdentity(entity, entityType, identity); err != nil {
+		return err
 	}
-	if s == nil {
-		return nil, ErrNilSession
+	if s.snapshots == nil {
+		s.snapshots = make(map[any]map[string]fieldSnapshot)
 	}
-
-	entityType := reflect.TypeFor[T]()
-	descriptor, err := mapperDescriptorFor(entityType)
-	if err != nil {
-		return nil, fmt.Errorf("map loaded entity %s: %w", entityType, err)
-	}
-	identity, err := descriptor.loadIdentity(id)
-	if err != nil {
-		return nil, err
-	}
-	if typeMap := s.identityMap[entityType]; typeMap != nil {
-		if existing, found := typeMap[identity]; found {
-			return existing.(*T), nil
-		}
-	}
-	if s.db == nil {
-		return nil, ErrNilSessionDatabase
-	}
-	primaryValues, err := descriptor.loadPrimaryValues(id)
-	if err != nil {
-		return nil, err
-	}
-
-	plan, err := s.loadPlan(descriptor)
-	if err != nil {
-		return nil, err
-	}
-	arguments := plan.NewArgumentBuffer()
-	for position, value := range primaryValues {
-		if err := arguments.Set(loadSlotName(position), value); err != nil {
-			return nil, fmt.Errorf("bind session load primary key: %w", err)
-		}
-	}
-	for _, binding := range plan.BindLayout() {
-		if binding.Kind() != compiler.SlotLimit {
-			continue
-		}
-		if err := arguments.SetPosition(binding.Position(), 1); err != nil {
-			return nil, fmt.Errorf("bind session load limit: %w", err)
-		}
-	}
-	rows, err := executor.Query(ctx, s.db, plan, arguments)
-	if err != nil {
-		return nil, fmt.Errorf("query session load: %w", err)
-	}
-	if !rows.Next() {
-		queryErr := rows.Err()
-		closeErr := rows.Close()
-		if queryErr != nil {
-			return nil, fmt.Errorf("iterate session load: %w", queryErr)
-		}
-		if closeErr != nil {
-			return nil, fmt.Errorf("close session load rows: %w", closeErr)
-		}
-		return nil, nil
-	}
-
-	mapper, err := NewMapper[T]()
-	if err != nil {
-		_ = rows.Close()
-		return nil, err
-	}
-	entity, err := mapper.Scan(rows)
-	if err != nil {
-		_ = rows.Close()
-		return nil, fmt.Errorf("map session load row: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close session load rows: %w", err)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate session load: %w", err)
-	}
-
-	loadedIdentity, present, err := mapper.PrimaryKey(entity)
-	if err != nil {
-		return nil, fmt.Errorf("read loaded entity primary key: %w", err)
-	}
-	if !present {
-		return nil, ErrLoadedEntityWithoutPrimaryKey
-	}
-	if loadedIdentity != identity {
-		return nil, fmt.Errorf(
-			"loaded entity identity %v does not match requested identity %v",
-			loadedIdentity,
-			identity,
-		)
-	}
-	if err := s.Add(entity); err != nil {
-		return nil, fmt.Errorf("register loaded entity: %w", err)
-	}
-	return entity, nil
-}
-
-func (s *Session) loadPlan(
-	descriptor *mapperDescriptor,
-) (compiler.CompiledStatement, error) {
-	if s.loadPlans == nil {
-		s.loadPlans = compiler.NewPlanRegistry()
-	}
-	if s.loadCache == nil {
-		s.loadCache = compiler.NewStatementCache()
-	}
-
-	planID := compiler.PlanID(fmt.Sprintf(
-		"orm.load.%s.%s",
-		descriptor.typ.PkgPath(),
-		descriptor.typ.Name(),
-	))
-	if plan, found := s.loadPlans.Get(planID); found {
-		return plan, nil
-	}
-
-	columns := make([]sst.ExpressionNode, len(descriptor.fields))
-	for position, field := range descriptor.fields {
-		columns[position] = sst.NewColumnRef(descriptor.table, field.column)
-	}
-	predicates := make([]sst.ExpressionNode, len(descriptor.primaryFields))
-	for position, fieldPosition := range descriptor.primaryFields {
-		field := descriptor.fields[fieldPosition]
-		predicates[position] = sst.Eq(
-			sst.NewColumnRef(descriptor.table, field.column),
-			sst.NewNamedParameterSlot(loadSlotName(position)),
-		)
-	}
-	if len(predicates) == 0 {
-		return compiler.CompiledStatement{}, fmt.Errorf(
-			"build session load plan: %w: %s",
-			ErrNoPrimaryKey,
-			descriptor.typ,
-		)
-	}
-
-	where := predicates[0]
-	if len(predicates) > 1 {
-		where = sst.And(predicates...)
-	}
-	statement := dql.Select(columns...).
-		From(sst.NewTableRef(descriptor.table)).
-		Where(where).
-		Limit(1)
-	plan, err := compiler.Prepare(
-		s.loadCache,
-		statement,
-		dialect.NewDefaultDialect(),
-	)
-	if err != nil {
-		return compiler.CompiledStatement{}, fmt.Errorf(
-			"prepare session load plan: %w",
-			err,
-		)
-	}
-	if err := s.loadPlans.Put(planID, plan); err != nil {
-		return compiler.CompiledStatement{}, fmt.Errorf(
-			"register session load plan: %w",
-			err,
-		)
-	}
-	return plan, nil
+	s.snapshots[entity] = snapshotMappedValues(values)
+	return nil
 }
 
 // Flush writes pending inserts and dirty persistent entities through a
@@ -507,7 +334,7 @@ func (s *Session) flushDirty(
 			if descriptor.typ != entityType {
 				return nil, fmt.Errorf("identity map type does not match entity %s", descriptor.typ)
 			}
-			currentIdentity, present, err := descriptor.primaryKey(root)
+			currentIdentity, present, err := descriptor.loadedPrimaryKey(root)
 			if err != nil {
 				return nil, fmt.Errorf("read persistent entity primary key: %w", err)
 			}
@@ -654,7 +481,7 @@ func (s *Session) updatePlan(
 		field := descriptor.fields[fieldPosition]
 		predicates[position] = sst.Eq(
 			sst.NewColumnRef(descriptor.table, field.column),
-			sst.NewNamedParameterSlot(loadSlotName(position)),
+			sst.NewNamedParameterSlot(primarySlotName(position)),
 		)
 	}
 	if len(predicates) == 0 {
@@ -718,7 +545,7 @@ func bindUpdateValues(
 	primaryPosition := 0
 	for _, value := range values {
 		if value.Primary {
-			if err := arguments.Set(loadSlotName(primaryPosition), value.Value); err != nil {
+			if err := arguments.Set(primarySlotName(primaryPosition), value.Value); err != nil {
 				return nil, fmt.Errorf("bind session update primary key: %w", err)
 			}
 			primaryPosition++
@@ -758,41 +585,7 @@ func mappedValuesDirty(
 	return false
 }
 
-func (d *mapperDescriptor) loadIdentity(id any) (any, error) {
-	if len(d.primaryFields) == 0 {
-		return nil, fmt.Errorf("%w: %s", ErrNoPrimaryKey, d.typ)
-	}
-	if len(d.primaryFields) == 1 {
-		if id == nil || !reflect.TypeOf(id).Comparable() {
-			return nil, fmt.Errorf("invalid session load identity %T", id)
-		}
-		return id, nil
-	}
-
-	values, err := d.loadPrimaryValues(id)
-	if err != nil {
-		return nil, err
-	}
-	return encodeCompositeKey(values), nil
-}
-
-func (d *mapperDescriptor) loadPrimaryValues(id any) ([]any, error) {
-	if len(d.primaryFields) == 1 {
-		return []any{id}, nil
-	}
-	values, ok := id.(CompositeKey)
-	if !ok || len(values) != len(d.primaryFields) {
-		return nil, fmt.Errorf("%w: got %T", ErrCompositeLoadKey, id)
-	}
-	for _, value := range values {
-		if value == nil || !reflect.TypeOf(value).Comparable() {
-			return nil, fmt.Errorf("%w: component %T", ErrCompositeLoadKey, value)
-		}
-	}
-	return append([]any(nil), values...), nil
-}
-
-func loadSlotName(position int) string {
+func primarySlotName(position int) string {
 	return fmt.Sprintf("pk_%d", position)
 }
 

@@ -46,41 +46,48 @@ DSL → AST → Compiler → Dialect → SQL + params
 
 ## Developer ergonomics target
 
-The project borrows SQLAlchemy's strongest developer-experience lesson: normal
-application code should express domain intent without manually coordinating
-compiler, cache, registry, bind layout, row scanning, or Identity Map details.
-Those engine boundaries stay explicit internally and remain available to Core
-users, but the ORM facade hides them.
+SQLAlchemy is the direct reference for SQLok's developer-facing query and ORM
+workflow. Application code should express model selection, composable criteria,
+result access, and Session Unit-of-Work operations without coordinating
+compiler plans, bind buffers, row scanning, or Identity Map details.
 
-Target application shape:
+The first functional SELECT slice is:
 
 ```go
-user, err := db.Users().Get(ctx, userID)
-active, err := db.Users().Where("active = ?", true).List(ctx)
+session := sqlok.NewSession(db)
 
-session := db.Session(tx)
-if err := session.Add(user); err != nil {
-    return err
-}
-return session.Flush(ctx)
+users, err := sqlok.Select(User{}).
+    Where(sqlok.Eq("active", true)).
+    All(ctx, session)
+
+user, err := sqlok.Select(User{}).
+    Where(sqlok.Eq("id", userID)).
+    OneOrNone(ctx, session)
 ```
 
-This syntax is directional, not an implemented API contract. The required
-experience is:
+`User{}` is a Go type witness; its field values are not read. `Eq` takes a
+mapped database-column name and binds the value. `All`, `One`, and `OneOrNone`
+return typed mapped entities, and the Session reuses tracked pointers through
+its Identity Map. `OneOrNone` limits execution to two rows to detect
+non-uniqueness. Typed field descriptors and richer expression operators remain
+WIP; this first slice is not the final ergonomics contract.
 
-- one discoverable model-oriented entry point;
-- composable query construction rather than handwritten string assembly;
-- automatic row-to-entity mapping;
-- Identity Map reuse inside a Session;
-- Add and Flush semantics for Unit-of-Work behavior;
-- compiled-plan reuse with no cache or `PlanID` plumbing in application code;
+The required experience is:
+
+- one discoverable `sqlok.Select(...)` model-oriented entry point;
+- composable criteria rather than handwritten SQL strings;
+- automatic row-to-entity mapping and Identity Map reuse;
+- Session execution with reusable prepared plans and no compiler/cache plumbing
+  in application code;
+- Session Unit-of-Work writes, with the current caller-owned `Flush(ctx, tx)`
+  contract clearly documented;
 - direct Core and raw `database/sql` escape hatches when the ORM is not the
   right tool.
 
-Go ergonomics take precedence over Python imitation. SQLok will not reproduce
-operator overloading or runtime class machinery; concrete fluent return types,
-generics, ordinary errors, and explicit transaction ownership provide the Go
-version of the same productive workflow.
+The module currently targets Go 1.24.0. Its typed query carries the result type
+and exposes execution methods that receive a Session; raising the Go floor for
+generic concrete methods requires an explicit compatibility decision. Any other
+deviation from SQLAlchemy needs a strong, specific SQLok or Go reason.
 
 ### Position alongside sqlc
 
@@ -106,29 +113,21 @@ requirement for the ORM.
 
 ### DSL
 
-The DSL is the user-facing builder API.
-
-Example shape:
-
-```go
-Select("id", "name").From("users").Where(Eq("id", 1)).Build()
-```
-
-The DSL should not concatenate final SQL directly forever. Its long-term role is to populate an internal AST.
-
-For SELECT construction, the public entry point is `Select(...)`. It returns a
-`SelectStatement`, which is the concrete builder and AST root:
+The ORM-facing root constructor is `sqlok.Select(model)`. It returns a typed
+query builder that composes mapped-entity criteria and executes through a
+Session:
 
 ```go
-stmt := Select(id, name).
-    From(users).
-    Join(orders).
-    On(userID == orderUserID)
+query := sqlok.Select(User{}).
+    Where(sqlok.Eq("name", "Ana"))
+users, err := query.All(ctx, session)
 ```
 
-`Select` is the SQL-facing constructor; `SelectStatement` is the concrete
-statement type. The SST `SelectStatementNode` remains the behavior contract
-implemented by `SelectStatement`.
+The low-level `sst/dql.Select(columns...)` remains the AST builder used under
+the facade and by Core-oriented callers. It returns a concrete
+`dql.SelectStatement`, which implements the SST `SelectStatementNode` contract.
+Keep that AST boundary structural; ordinary ORM callers should not construct
+SST nodes or bind parameters directly.
 
 ### AST
 
@@ -300,16 +299,15 @@ Session must consume Mapper metadata rather than repeat reflection for primary
 keys or field traversal. A Session may use shared `StatementCache` and
 `PlanRegistry` instances, but it does not own process-wide compiled artifacts.
 
-The implemented ORM slice is deliberately narrow:
+The implemented ORM slice is:
 
 ```text
-LoadContext[T]
-  → Identity Map lookup
-  → prepared SELECT on miss
+Select(T{}).Where(Eq(column, value)).All/One/OneOrNone(ctx, Session)
+  → typed entity SELECT AST
+  → Session-private prepared read-plan reuse
   → Executor.Query
   → Mapper.Scan
-  → Identity Map registration and snapshot
-  → return the same pointer on later loads
+  → Identity Map reuse/registration and snapshot
 
 Session.Flush(ctx, tx)
   → INSERT pending entities
@@ -317,7 +315,9 @@ Session.Flush(ctx, tx)
   → refresh snapshots after successful statements
 ```
 
-The caller owns `tx`; Session never begins, commits, or rolls back it.
+`LoadContext` and `Load` have been removed; primary-key and composite-key
+lookups use normal SELECT criteria. The caller still owns `tx`; Session does
+not begin, commit, or roll back it.
 
 ## Research basis
 
@@ -335,7 +335,8 @@ The main imported lessons are:
 - keep AST nodes structural and responsible for child traversal
 - keep final SQL rendering in a compiler/dialect boundary
 
-This is an architectural translation into Go, not a feature-parity project:
+This table maps observed SQLAlchemy concepts to SQLok's architecture; the
+product target remains SQLAlchemy-like developer ergonomics:
 
 | Source concept | SQLok interpretation |
 |---|---|
@@ -348,13 +349,11 @@ This is an architectural translation into Go, not a feature-parity project:
 | Engine / Connection | application-owned `database/sql` handles through `Executor` |
 | Declarative models | future Go structs, tags, and generic APIs rather than runtime class machinery |
 
-The project deliberately does not copy Python operator overloading, automatic
-driver ownership, implicit transaction boundaries, or a mandatory ORM entry
-point. It does aim to match the productive application workflow: expressive
-queries, automatic mapping, coherent Session behavior, and infrastructure that
-stays out of ordinary call sites. Relationship loading, cascades, events, and
-broad SQL feature parity are later scope; they do not gate the first working
-Mapper/Session slice.
+SQLok follows SQLAlchemy's productive application workflow. The current Go
+1.24 floor uses explicit `Eq(column, value)` criteria and typed query methods
+instead of overloaded field operators or generic methods on Session. These are
+specific language-version adaptations, not reasons to weaken the SQLAlchemy
+reference. Relationship loading, cascades, and events remain WIP.
 
 ## Current package boundaries
 
@@ -366,7 +365,7 @@ compiler/   validation, rendering, shape identity, caches, and prepared plans
 dialect/    rendering contract and default question-mark implementation
 executor/   database/sql-compatible execution boundary
 mapper.go   public struct metadata, scanning, and values
-session.go  public Identity Map, Load, snapshots, and Flush
+session.go  public Session Unit of Work, Identity Map, snapshots, and Flush
 ```
 
 The legacy string builder and schema loader remain under `internal/`. DDL
@@ -438,17 +437,19 @@ canonical shape keys; bounded statement caching; stable prepared-plan lookup;
 and a driver-agnostic Executor. The prepared named-binding path is validated
 end to end and remains allocation-free in the current benchmark.
 
-The missing bridge is ORM mapping and lifecycle, not another cache layer. Work
-should proceed in this order:
+The first typed SELECT vertical slice now composes mapped-entity equality
+criteria, executes through Session with cached prepared plans, maps rows, and
+reuses Identity Map pointers. `LoadContext` and `Load` were removed in favor of
+that public query path.
 
-1. implement a stateless Mapper and its metadata/scan tests;
-2. refactor Session primary-key handling to consume Mapper metadata;
-3. implement database-backed `Session.Load` through prepared SELECT execution;
-4. prove Identity Map reuse with an end-to-end test;
-5. implement explicit Flush planning for pending and dirty entities;
-6. consolidate the public DSL/ORM API without making Session mandatory for
-   Core users.
+Continue top-down from the application contract:
 
-Relationships, eager/lazy loading, automatic prepared-query promotion, schema
-fingerprinting, and DDL remain later decisions. They must not be mixed into the
-first Mapper/Session vertical slice.
+1. add richer typed field expressions and comparison operators;
+2. define projected/scalar result shapes beyond mapped entities;
+3. align Session Unit-of-Work DELETE and transaction lifecycle with the target
+   developer workflow;
+4. add batch query and relation-loading behavior;
+5. update the separately owned SQLite adapter E2E suite after the core API is
+   stable.
+
+Relationships, eager/lazy loading, schema fingerprinting, and DDL remain WIP.

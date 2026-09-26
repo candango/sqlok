@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"io"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -217,122 +218,6 @@ func sessionTestExecs() []sessionTestExec {
 	return append([]sessionTestExec(nil), sessionTestDatabase.execs...)
 }
 
-func TestSessionLoadContextQueriesPreparedPlanAndCachesIdentity(t *testing.T) {
-	db := newSessionTestDB(t, sessionTestResponse{
-		columns: []string{"id", "name"},
-		rows:    [][]driver.Value{{int64(7), "Ana"}},
-	})
-	session := NewSession(db)
-
-	first, err := LoadContext[TestUser](context.Background(), session, 7)
-	if !assert.NoError(t, err) {
-		return
-	}
-	assert.Equal(t, &TestUser{
-		TestUserBase: TestUserBase{Id: 7},
-		Name:         "Ana",
-	}, first)
-	assert.Contains(t, session.snapshots, first)
-	assert.Len(t, session.snapshots[first], 2)
-	assert.Contains(t, session.snapshots[first], "id")
-	assert.Contains(t, session.snapshots[first], "name")
-
-	queries := sessionTestQueries()
-	if !assert.Len(t, queries, 1) {
-		return
-	}
-	assert.Equal(
-		t,
-		"SELECT test_user.id, test_user.name FROM test_user WHERE test_user.id = ? LIMIT ?",
-		queries[0].query,
-	)
-	assert.Equal(t, []driver.NamedValue{
-		{Ordinal: 1, Value: int64(7)},
-		{Ordinal: 2, Value: int64(1)},
-	}, queries[0].args)
-	assert.Equal(t, 1, session.loadPlans.Len())
-	assert.Equal(t, 1, session.loadCache.Len())
-
-	second, err := LoadContext[TestUser](context.Background(), session, 7)
-	assert.NoError(t, err)
-	assert.Same(t, first, second)
-	assert.Len(t, sessionTestQueries(), 1)
-
-	setSessionTestResponse(sessionTestResponse{
-		columns: []string{"id", "name"},
-		rows:    [][]driver.Value{{int64(8), "Bia"}},
-	})
-	third, err := LoadContext[TestUser](context.Background(), session, 8)
-	assert.NoError(t, err)
-	assert.Equal(t, "Bia", third.Name)
-	assert.Len(t, sessionTestQueries(), 2)
-	assert.Equal(t, 1, session.loadPlans.Len())
-	assert.Equal(t, 1, session.loadCache.Len())
-}
-
-func TestSessionLoadContextHandlesMissingAndInvalidRows(t *testing.T) {
-	t.Run("missing row", func(t *testing.T) {
-		db := newSessionTestDB(t, sessionTestResponse{columns: []string{"id", "name"}})
-		loaded, err := LoadContext[TestUser](context.Background(), NewSession(db), 7)
-		assert.NoError(t, err)
-		assert.Nil(t, loaded)
-	})
-
-	t.Run("mismatched identity", func(t *testing.T) {
-		db := newSessionTestDB(t, sessionTestResponse{
-			columns: []string{"id", "name"},
-			rows:    [][]driver.Value{{int64(8), "Bia"}},
-		})
-		session := NewSession(db)
-		loaded, err := LoadContext[TestUser](context.Background(), session, 7)
-		assert.Error(t, err)
-		assert.Nil(t, loaded)
-		assert.Empty(t, session.identityMap)
-	})
-
-	t.Run("nil context", func(t *testing.T) {
-		loaded, err := LoadContext[TestUser](nil, NewSession(nil), 7)
-		assert.ErrorIs(t, err, ErrNilLoadContext)
-		assert.Nil(t, loaded)
-	})
-}
-
-func TestSessionLoadContextReusesPointerIdentity(t *testing.T) {
-	db := newSessionTestDB(t, sessionTestResponse{
-		columns: []string{"id", "name"},
-		rows:    [][]driver.Value{{int64(0), "Zero"}},
-	})
-	session := NewSession(db)
-
-	first, err := LoadContext[TestPointerUser](context.Background(), session, 0)
-	if !assert.NoError(t, err) {
-		return
-	}
-	if !assert.NotNil(t, first.Id) {
-		return
-	}
-	assert.Zero(t, *first.Id)
-
-	second, err := LoadContext[TestPointerUser](context.Background(), session, 0)
-	assert.NoError(t, err)
-	assert.Same(t, first, second)
-	assert.Len(t, sessionTestQueries(), 1)
-}
-
-func TestSessionLoadContextRejectsMappingFailureWithoutState(t *testing.T) {
-	db := newSessionTestDB(t, sessionTestResponse{
-		columns: []string{"id", "name"},
-		rows:    [][]driver.Value{{"not-an-id", "Ana"}},
-	})
-	session := NewSession(db)
-
-	loaded, err := LoadContext[TestUser](context.Background(), session, 7)
-	assert.Error(t, err)
-	assert.Nil(t, loaded)
-	assert.Empty(t, session.identityMap)
-	assert.Empty(t, session.snapshots)
-}
-
 func TestSessionFlushWritesPendingAndDirtyEntities(t *testing.T) {
 	t.Run("pending insert", func(t *testing.T) {
 		db := newSessionTestDB(t, sessionTestResponse{lastInsertID: 7})
@@ -350,9 +235,7 @@ func TestSessionFlushWritesPendingAndDirtyEntities(t *testing.T) {
 		assert.Equal(t, 7, user.Id)
 		assert.Contains(t, session.snapshots, user)
 
-		loaded, loadErr := Load[TestUser](session, 7)
-		assert.NoError(t, loadErr)
-		assert.Same(t, user, loaded)
+		assert.Same(t, user, session.identityMap[reflect.TypeFor[TestUser]()][7])
 
 		execs := sessionTestExecs()
 		if !assert.Len(t, execs, 1) {
@@ -491,46 +374,4 @@ func TestSessionFlushWritesPendingAndDirtyEntities(t *testing.T) {
 		assert.ErrorIs(t, session.Flush(nil, nil), ErrNilFlushContext)
 		assert.ErrorIs(t, session.Flush(context.Background(), nil), ErrNilFlushTransaction)
 	})
-}
-
-func TestSessionLoadContextBindsCompositeKeyInDeclarationOrder(t *testing.T) {
-	db := newSessionTestDB(t, sessionTestResponse{
-		columns: []string{"org_id", "user_id", "name"},
-		rows:    [][]driver.Value{{int64(1), int64(200), "Ana"}},
-	})
-	session := NewSession(db)
-
-	loaded, err := LoadContext[TestCompositeUser](
-		context.Background(),
-		session,
-		CompositeKey{1, 200},
-	)
-	if !assert.NoError(t, err) {
-		return
-	}
-	assert.Equal(t, &TestCompositeUser{OrgId: 1, UserId: 200, Name: "Ana"}, loaded)
-
-	queries := sessionTestQueries()
-	if !assert.Len(t, queries, 1) {
-		return
-	}
-	assert.Equal(
-		t,
-		"SELECT test_composite_user.org_id, test_composite_user.user_id, test_composite_user.name FROM test_composite_user WHERE test_composite_user.org_id = ? AND test_composite_user.user_id = ? LIMIT ?",
-		queries[0].query,
-	)
-	assert.Equal(t, []driver.NamedValue{
-		{Ordinal: 1, Value: int64(1)},
-		{Ordinal: 2, Value: int64(200)},
-		{Ordinal: 3, Value: int64(1)},
-	}, queries[0].args)
-
-	second, err := LoadContext[TestCompositeUser](
-		context.Background(),
-		session,
-		CompositeKey{1, 200},
-	)
-	assert.NoError(t, err)
-	assert.Same(t, loaded, second)
-	assert.Len(t, sessionTestQueries(), 1)
 }

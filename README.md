@@ -6,16 +6,16 @@ current integration-test target.
 
 ## Overview
 
-**sqlok** translates SQLAlchemy-style developer ergonomics into idiomatic Go:
-expressive query construction, automatic result mapping, coherent Session
-behavior, and infrastructure hidden from ordinary application call sites. It
-is not a feature-for-feature Python port.
+**sqlok** uses SQLAlchemy as the direct reference for developer ergonomics,
+expressed through Go's types and APIs: composable queries, automatic result
+mapping, coherent Session behavior, and infrastructure hidden from ordinary
+application call sites. Deviations require a concrete SQLok or Go constraint.
 
 The implemented engine provides SQL Semantic Tree (SST) statement roots, a
 dialect-aware compiler, immutable compiled plans, and driver-agnostic execution
 on top of `database/sql`. The public root package exposes a stateless Mapper
-and a Session Unit of Work with Identity Map reuse, database-backed loading,
-and explicit transactional flushing.
+and a Session Unit of Work with typed SELECT queries, automatic result mapping,
+Identity Map reuse, and explicit transactional flushing.
 
 ## Features
 
@@ -23,7 +23,7 @@ and explicit transactional flushing.
 - **Compiler** - Structural validation, bind layouts, shape identities, and SQL rendering
 - **Compiled Plans** - Bounded statement cache and stable `PlanRegistry` warm path
 - **Driver-Agnostic Execution** - `database/sql`-compatible executor boundary
-- **Mapper and Session** - Struct mapping, Identity Map reuse, prepared loads, explicit flushes, and numeric generated keys via `LastInsertId`
+- **Mapper and Session** - Typed SELECT queries, struct mapping, Identity Map reuse, INSERT/UPDATE flushing, and numeric generated keys via `LastInsertId`
 - **Schema Management** - Internal table, field, and foreign-key definitions
 - **Legacy Query Builder** - Internal fluent string builder pending consolidation
 - **CLI Interface** - Schema inspection and example-generation commands
@@ -41,11 +41,13 @@ go get github.com/candango/sqlok
 
 ## Quick Start
 
-### Mapper and Session
+### SELECT and Session
 
-Map an entity with `sqlok` tags, load it through a Session, and flush changes
-through an application-owned transaction. Ordinary application code does not
-need to construct compiler plans or bind buffers.
+Build a typed entity query with `sqlok.Select`, then execute it through the
+Session. `Eq` binds non-NULL values; repeated `Where` calls compose with AND. NULL
+predicates are still WIP and `Eq` rejects nil rather than emitting incorrect
+`= NULL` SQL. `All` returns mapped entities, while `OneOrNone` returns nil for
+no match and reports an error if more than one row matches.
 
 ```go
 package main
@@ -66,7 +68,9 @@ func (*User) TableName() string { return "users" }
 
 func rename(ctx context.Context, db *sql.DB, id int, name string) error {
   session := sqlok.NewSession(db)
-  user, err := sqlok.LoadContext[User](ctx, session, id)
+  user, err := sqlok.Select(User{}).
+    Where(sqlok.Eq("id", id)).
+    OneOrNone(ctx, session)
   if err != nil {
     return err
   }
@@ -88,14 +92,15 @@ func rename(ctx context.Context, db *sql.DB, id int, name string) error {
 }
 ```
 
-`LoadContext` returns the already-tracked pointer on an Identity Map hit.
-Composite loads use `sqlok.CompositeKey` in primary-field declaration order.
-`Flush` never starts, commits, or rolls back a transaction; if the caller rolls
-one back after a successful flush, discard that Session before retrying.
+`Select(User{})` uses the value only as a Go type witness. Results are mapped
+and tracked in the Session Identity Map. Composite-key queries use ordinary
+criteria, for example `Where(Eq("tenant_id", 7), Eq("user_id", 11))`; no
+`CompositeKey` value is exposed. Session writes remain caller-transactional:
+`Flush` never begins, commits, or rolls back a transaction. SELECT currently
+uses the Session's `*sql.DB` and does not autoflush pending/dirty entities;
+transaction-bound reads and autoflush remain WIP.
 
-The legacy query builder and schema loader are repository-internal today. Their
-API is being migrated toward the SELECT SST/compiler path before becoming part
-of the stable public package.
+The legacy query builder and schema loader remain repository-internal.
 
 ### Schema Definition
 
@@ -148,7 +153,7 @@ schema loader is currently internal and uses `database/sql`.
 - **`executor/`** - Driver-agnostic execution of compiled plans
 
 - **`mapper.go`** - Public stateless struct metadata, scanning, and values
-- **`session.go`** - Public Session loading, Identity Map, and explicit flushing
+- **`session.go`** - Public Session Unit of Work, Identity Map, and explicit flushing
 
 - **`internal/schema/`** - Internal schema definitions
   - `Table` - Represents a database table

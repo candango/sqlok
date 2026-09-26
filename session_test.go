@@ -1,6 +1,8 @@
 package sqlok
 
 import (
+	"context"
+	"database/sql/driver"
 	"reflect"
 	"testing"
 
@@ -135,31 +137,42 @@ func TestSession_Add(t *testing.T) {
 	})
 }
 
-func TestSession_Load(t *testing.T) {
-	s := NewSession(nil)
-	user := &TestUser{TestUserBase: TestUserBase{Id: 50}, Name: "Database User"}
-	assert.NoError(t, s.Add(user))
+func TestSessionSelectTracksExistingAndCompositeEntities(t *testing.T) {
+	t.Run("existing identity is reused", func(t *testing.T) {
+		db := newSessionTestDB(t, sessionTestResponse{
+			columns: []string{"id", "name"},
+			rows:    [][]driver.Value{{int64(50), "Database User"}},
+		})
+		session := NewSession(db)
+		user := &TestUser{TestUserBase: TestUserBase{Id: 50}, Name: "Database User"}
+		assert.NoError(t, session.Add(user))
 
-	t.Run("Should load existing object from identity map", func(t *testing.T) {
-		loaded, err := Load[TestUser](s, 50)
+		users, err := Select(TestUser{}).Where(Eq("id", 50)).All(context.Background(), session)
 		assert.NoError(t, err)
-		assert.NotNil(t, loaded)
-		assert.Equal(t, user, loaded)
-		assert.Equal(t, "Database User", loaded.Name)
+		assert.Len(t, users, 1)
+		assert.Same(t, user, users[0])
+		assert.Equal(t, "Database User", users[0].Name)
 	})
 
-	t.Run("Should load existing composite object from identity map", func(t *testing.T) {
-		comp := &TestCompositeUser{OrgId: 1, UserId: 200, Name: "Comp User"}
-		assert.NoError(t, s.Add(comp))
-
-		loaded, err := Load[TestCompositeUser](s, CompositeKey{1, 200})
+	t.Run("composite identity uses ordinary criteria", func(t *testing.T) {
+		db := newSessionTestDB(t, sessionTestResponse{
+			columns: []string{"org_id", "user_id", "name"},
+			rows:    [][]driver.Value{{int64(1), int64(200), "Comp User"}},
+		})
+		session := NewSession(db)
+		users, err := Select(TestCompositeUser{}).
+			Where(Eq("org_id", 1), Eq("user_id", 200)).
+			All(context.Background(), session)
 		assert.NoError(t, err)
-		assert.Equal(t, comp, loaded)
+		assert.Equal(t, []*TestCompositeUser{{OrgId: 1, UserId: 200, Name: "Comp User"}}, users)
 	})
 
-	t.Run("Should return nil when object not in session", func(t *testing.T) {
-		loaded, err := Load[TestUser](s, 999)
-		assert.ErrorIs(t, err, ErrNilSessionDatabase)
-		assert.Nil(t, loaded)
+	t.Run("missing row returns empty result", func(t *testing.T) {
+		db := newSessionTestDB(t, sessionTestResponse{columns: []string{"id", "name"}})
+		users, err := Select(TestUser{}).
+			Where(Eq("id", 999)).
+			All(context.Background(), NewSession(db))
+		assert.NoError(t, err)
+		assert.Empty(t, users)
 	})
 }

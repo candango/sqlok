@@ -9,7 +9,7 @@ description: Guide agents working on SQLok from developer-facing API design thro
 
 SQLAlchemy is the direct reference for SQLok's developer-facing API and workflow. A deviation requires a very strong, specific reason grounded in a real SQLok or Go constraint. Explain why the SQLAlchemy-shaped design does not work; convenience, novelty, or generic stylistic preference is not enough.
 
-The intended experience is expressive query construction, automatic result mapping, coherent Session/Unit-of-Work behavior, and infrastructure hidden from ordinary application call sites. `LoadContext` is legacy to be replaced by the public SELECT workflow, not a target API to preserve. Do not make `CompositeKey` the ergonomic model for composite identities.
+The intended experience is expressive query construction, automatic result mapping, coherent Session/Unit-of-Work behavior, and infrastructure hidden from ordinary application call sites. `LoadContext` and `Load` have been removed; do not reintroduce them. Do not make `CompositeKey` the ergonomic model for composite identities.
 
 ## Work top-down
 
@@ -47,43 +47,44 @@ Preserve the operation model and call-site ergonomics in Go. Keep the current `g
 
 ## Current implementation ledger
 
-### Implemented foundation (not the finished target workflow)
+### Implemented foundation
 
 - SST has SELECT, INSERT, UPDATE, and DELETE roots; `sst/dql.Select` builds low-level SELECT AST statements.
 - The compiler provides dialect rendering, bind layouts, prepared statement caching, and plan registries.
 - `Mapper[T]` supports struct metadata, row scanning, and value extraction.
+- `sqlok.Select(User{}).Where(sqlok.Eq("name", "Ana"))` builds a typed entity query. `All`, `One`, and `OneOrNone` execute through Session, map rows, reuse Identity Map pointers, and use Session-private prepared read plans. Values are bound; `OneOrNone` limits reads to two rows.
 - `Session.Add` and `Session.Flush(ctx, tx)` support pending INSERTs and dirty UPDATEs. Flush receives a caller-owned transaction. Generated-key support covers one numeric generated primary key.
-- The current core session tests use a hand-written `database/sql` fake driver. The separate `sqlok-sqlite-modernc` E2E suite uses real SQLite and currently exercises ORM lookups through `LoadContext`.
+- `LoadContext`, `Load`, and public `CompositeKey` were removed from core. Composite identity queries use one equality criterion per mapped key column.
 
-### WIP — target SQLAlchemy-like workflow
+### WIP — remaining SQLAlchemy-like workflow
 
-- Public `sqlok.Select(...)` for mapped entities and composable predicates.
-- Session execution with typed results/scalars, automatic mapping, and identity-map reuse.
-- Replacement/removal of `LoadContext` as the ORM lookup path; composite identity ergonomics without `CompositeKey` leakage.
-- Session Unit-of-Work DELETE alongside INSERT and UPDATE.
-- Session transaction lifecycle and ownership contract.
+- Typed field descriptors and richer composable predicates beyond equality by mapped column name; NULL predicates are not implemented, so `Eq` rejects nil values.
+- Projected/scalar row result shapes, reads bound to caller transactions, and SQLAlchemy-style autoflush before queries.
+- Session Unit-of-Work DELETE and the target transaction lifecycle.
 - Batch query and relation loading.
-- Public contract tests, docs, and downstream migration of ORM E2E reads to the finalized public API.
+- Migrate the separately owned `sqlok-sqlite-modernc` E2E suite from its pinned legacy core API to public SELECT; do not edit that repository unless the active task explicitly includes it.
+- Broader public API contract tests and migration documentation.
 
 ## Test and performance gates
 
 - Run focused tests during development and `go test ./...` plus `go vet ./...` before completion, unless repository policy specifies a stronger gate.
-- Fake `database/sql` drivers are useful for precise core behavior, but do not substitute for real-driver E2E evidence when changing execution or mapping. Do not edit the separate SQLite adapter repository unless the active task explicitly includes it.
+- Core SELECT tests currently use a hand-written `database/sql` fake driver. That validates SQL shape, binds, mapping, and identity behavior, but not a real database driver. Real SQLite E2E migration remains a separate adapter task; do not edit that repository unless explicitly included.
 - Treat performance as a non-regression requirement. Benchmark affected paths before and after changes under comparable conditions, preserve reusable plan/metadata caches, and investigate material regressions. Do not claim gains or zero regression without reproducible measurements.
 
-Baseline captured 2026-09-26 before SELECT API implementation, using Go 1.27.0 on Linux/amd64 (AMD Ryzen 5 1600), five runs:
+Benchmarks captured on Go 1.27.0, Linux/amd64, AMD Ryzen 5 1600, five runs, using the core fake driver:
 
-- `BenchmarkSessionIdentityMapHit`: 82.19–86.25 ns/op, 0 B/op, 0 allocs/op.
-- `BenchmarkSessionLoadPreparedMiss`: 10.039–10.761 µs/op, 1,754 B/op, 30 allocs/op.
-- `BenchmarkASTCompileCachedShape`: 7.353–7.647 ns/op, 0 B/op, 0 allocs/op.
+- Historical `LoadContext` prepared miss before removal: 10.039–10.761 µs/op, 1,754 B/op, 30 allocs/op.
+- Current inline `Select(...).Where(...).All(...)`: 8.511–10.345 µs/op, 1,770 B/op, 31 allocs/op.
+- Current inline `Select(...).Where(...).OneOrNone(...)`: 10.063–10.717 µs/op, 1,882 B/op, 30 allocs/op.
+- `BenchmarkASTCompileCachedShape`: 7.399–7.717 ns/op, 0 B/op, 0 allocs/op.
 
-Reproduce with:
+Reproduce current full-call SELECT and compiler measurements with:
 
 ```bash
-go test -run='^$' -bench='^(BenchmarkSessionLoadPreparedMiss|BenchmarkSessionIdentityMapHit|BenchmarkASTCompileCachedShape|BenchmarkMapperRows)$' -benchmem -count=5 ./...
+go test -run='^$' -bench='^(BenchmarkSessionSelectBuildAnd(All|OneOrNone)|BenchmarkASTCompileCachedShape)$' -benchmem -count=5 ./...
 ```
 
-These are adjacent existing-path baselines, not performance results for the new API. Add an equivalent query/result benchmark when its public contract exists.
+These fake-driver benchmarks measure core overhead and allocations, not real database latency. Keep real-driver E2E measurements separate.
 
 ## Focus and commits
 

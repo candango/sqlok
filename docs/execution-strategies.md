@@ -223,12 +223,11 @@ remain scoped to the current Session/request.
 The implemented ORM path is:
 
 ```text
-LoadContext[T](ctx, session, id)
-  → return tracked pointer on Identity Map hit
-  → on miss, execute one prepared SELECT
-  → map one row through Mapper
-  → register and snapshot the entity
-  → return that same pointer on subsequent loads
+Select(Entity{}).Where(Eq(column, value)).All/One/OneOrNone(ctx, session)
+  → build typed SELECT AST and reuse its prepared read plan
+  → execute through the Session database handle
+  → map rows through Mapper
+  → register new entities or reuse tracked pointers
 
 session.Flush(ctx, tx)
   → INSERT pending entities through caller-owned tx
