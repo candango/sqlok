@@ -4,6 +4,37 @@ This document stores external research and source-backed references used to shap
 `sqlok`. It records what other projects do; `docs/vision.md` records what
 `sqlok` chooses to become.
 
+## SQLAlchemy ORM Session and Unit of Work
+
+SQLAlchemy 2.x uses `Session` as the ORM boundary for querying and managing
+mapped objects. The Session maintains an identity map with one object per
+identity. ORM queries use a `select(...)` statement executed through
+`Session.scalars()` or `Session.execute()`.
+
+The ORM Unit of Work tracks new objects added with `Session.add()`, attribute
+changes on persistent objects, and objects marked with `Session.delete()`.
+`Session.flush()` emits pending INSERT, UPDATE, and DELETE statements. By default,
+flush occurs before ORM queries and before commit; commit or rollback ends the
+Session's transaction. `Session.get(Entity, primary_key)` is the dedicated
+identity-map-first lookup by primary key.
+
+Representative query shape:
+
+```python
+stmt = select(User).where(User.name == "Ana")
+users = session.scalars(stmt).all()
+```
+
+Sources:
+
+- [Session Basics: What does the Session do?](https://docs.sqlalchemy.org/en/20/orm/session_basics.html#what-does-the-session-do)
+- [Session Basics: Querying](https://docs.sqlalchemy.org/en/20/orm/session_basics.html#querying)
+- [Session Basics: Adding objects](https://docs.sqlalchemy.org/en/20/orm/session_basics.html#adding-new-or-existing-items)
+- [Session Basics: Deleting objects](https://docs.sqlalchemy.org/en/20/orm/session_basics.html#deleting)
+- [Session Basics: Flushing](https://docs.sqlalchemy.org/en/20/orm/session_basics.html#flushing)
+- [Session Basics: Get by Primary Key](https://docs.sqlalchemy.org/en/20/orm/session_basics.html#get-by-primary-key)
+- [ORM Data Manipulation with the Unit of Work](https://docs.sqlalchemy.org/en/20/tutorial/orm_data_manipulation.html)
+
 ## SQLAlchemy Core statement and AST model
 
 Reference project: SQLAlchemy, commit
@@ -23,9 +54,9 @@ For `sqlok`, the comparable shape is:
 Builder DSL → AST → Compiler/Dialect → SQL + args
 ```
 
-The lesson is not to copy SQLAlchemy feature-for-feature. The useful part is the
-separation between the user-facing construction API, statement/expression tree,
-compiler/dialect layer, and final SQL output.
+The relevant observation is SQLAlchemy's separation between its user-facing
+construction API, statement/expression tree, compiler/dialect layer, and final
+SQL output.
 
 ### SELECT returns a statement root
 
