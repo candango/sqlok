@@ -35,6 +35,34 @@ Sources:
 - [Session Basics: Get by Primary Key](https://docs.sqlalchemy.org/en/20/orm/session_basics.html#get-by-primary-key)
 - [ORM Data Manipulation with the Unit of Work](https://docs.sqlalchemy.org/en/20/tutorial/orm_data_manipulation.html)
 
+### Scalar result semantics
+
+SQLAlchemy 2.0 exposes scalar extraction at the execution boundary, not as a
+projection-only statement method. `Session.scalars(stmt)` returns a
+`ScalarResult` whose iteration yields the first selected element from each row.
+The equivalent Core operation is `Result.scalars(index=0)`, where `index=0` is
+the default and another column index may be selected explicitly.
+
+For a statement selecting multiple columns, scalar extraction intentionally
+returns only the selected element at the requested index. Callers that need the
+complete multi-column shape use `Session.execute(stmt)` or `Connection.execute(stmt)`
+and consume `Row` results instead. `scalar()` and `scalar_one()` are separate
+single-value cardinality helpers.
+
+Representative shapes:
+
+```python
+stmt = select(User.name, User.fullname)
+names = session.scalars(stmt).all()       # first selected element
+rows = session.execute(stmt).all()       # complete Row values
+```
+
+Sources:
+
+- [Session.scalars](https://docs.sqlalchemy.org/en/20/orm/session_api.html)
+- [Selecting ORM Entities and Columns](https://docs.sqlalchemy.org/en/20/tutorial/data_select.html)
+- [Result.scalars(index=0)](https://docs.sqlalchemy.org/en/20/core/connections.html)
+
 ## SQLAlchemy Core statement and AST model
 
 Reference project: SQLAlchemy, commit
