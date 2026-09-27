@@ -44,10 +44,11 @@ go get github.com/candango/sqlok
 ### SELECT and Session
 
 Build a typed entity query with `sqlok.Select`, then execute it through the
-Session. `Eq` binds non-NULL values; repeated `Where` calls compose with AND. NULL
-predicates are still WIP and `Eq` rejects nil rather than emitting incorrect
-`= NULL` SQL. `All` returns mapped entities, while `OneOrNone` returns nil for
-no match and reports an error if more than one row matches.
+Session. `Eq`, `Ne`, `Gt`, `Gte`, `Lt`, and `Lte` bind non-NULL values, while
+`IsNull` and `IsNotNull` render NULL predicates without binds. Repeated `Where`
+calls compose with AND, and comparison criteria reject nil rather than emitting
+incorrect `= NULL` SQL. `All` returns mapped entities, while `OneOrNone` returns
+nil for no match and reports an error if more than one row matches.
 
 ```go
 package main
@@ -94,8 +95,9 @@ func rename(ctx context.Context, db *sql.DB, id int, name string) error {
 
 `Select(User{})` uses the value only as a Go type witness. Results are mapped
 and tracked in the Session Identity Map. Composite-key queries use ordinary
-criteria, for example `Where(Eq("tenant_id", 7), Eq("user_id", 11))`; no
-`CompositeKey` value is exposed. Session writes remain caller-transactional:
+criteria, for example `Where(Eq("tenant_id", 7), Eq("user_id", 11))`; NULL
+queries use `Where(IsNull("deleted_at"))`; no `CompositeKey` value is exposed.
+Session writes remain caller-transactional:
 `Flush` never begins, commits, or rolls back a transaction. SELECT currently
 uses the Session's `*sql.DB` and does not autoflush pending/dirty entities;
 transaction-bound reads and autoflush remain WIP.

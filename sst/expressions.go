@@ -156,6 +156,62 @@ func (e *BinaryExpression) Operator() ComparisonOperator {
 	return e.op
 }
 
+// NullExpressionNode represents a NULL predicate over one expression.
+type NullExpressionNode interface {
+	ExpressionTextNode
+	Operand() ExpressionNode
+	Operator() NullOperator
+}
+
+// NullExpression represents an IS NULL or IS NOT NULL predicate.
+type NullExpression struct {
+	operand ExpressionNode
+	op      NullOperator
+}
+
+var _ NullExpressionNode = (*NullExpression)(nil)
+
+// NewNullExpression creates a NULL predicate with the provided operator.
+func NewNullExpression(operand ExpressionNode, operator NullOperator) *NullExpression {
+	return &NullExpression{operand: operand, op: operator}
+}
+
+// Expr returns the SQL suffix for the NULL predicate.
+func (e *NullExpression) Expr() string {
+	switch e.Operator() {
+	case IsNotNull:
+		return " IS NOT NULL"
+	default:
+		return " IS NULL"
+	}
+}
+
+// Accept traverses the operand and renders the NULL predicate suffix.
+func (e *NullExpression) Accept(v Visitor) error {
+	if e.Operand() == nil {
+		return errors.New("NULL predicate requires an expression")
+	}
+	switch e.Operator() {
+	case IsNull, IsNotNull:
+	default:
+		return errors.New("unsupported NULL operator")
+	}
+	if err := e.Operand().Accept(v); err != nil {
+		return err
+	}
+	return v.VisitExpression(e)
+}
+
+// Operand returns the expression tested for NULL.
+func (e *NullExpression) Operand() ExpressionNode {
+	return e.operand
+}
+
+// Operator returns the NULL predicate operator.
+func (e *NullExpression) Operator() NullOperator {
+	return e.op
+}
+
 // LogicalExpression represents a logical operation over one or more
 // expressions.
 type LogicalExpression struct {

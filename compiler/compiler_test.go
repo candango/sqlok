@@ -179,6 +179,46 @@ func TestCompileSelectWithWhere(t *testing.T) {
 	assert.Equal(t, []any{42}, args)
 }
 
+func TestCompileSelectWithNullPredicate(t *testing.T) {
+	tests := []struct {
+		name      string
+		predicate sst.NullOperator
+		expected  string
+	}{
+		{
+			name:      "is null",
+			predicate: sst.IsNull,
+			expected:  "SELECT users.id FROM users WHERE users.deleted_at IS NULL",
+		},
+		{
+			name:      "is not null",
+			predicate: sst.IsNotNull,
+			expected:  "SELECT users.id FROM users WHERE users.deleted_at IS NOT NULL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stmt := dql.Select(
+				sst.NewColumnRef("users", "id"),
+			).From(
+				sst.NewTableRef("users"),
+			).Where(
+				sst.NewNullExpression(
+					sst.NewColumnRef("users", "deleted_at"),
+					tt.predicate,
+				),
+			)
+
+			sql, args, err := Compile(stmt)
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, sql)
+			assert.Empty(t, args)
+		})
+	}
+}
+
 func TestCompileSelectWithRepeatedWhere(t *testing.T) {
 	stmt := dql.Select(
 		sst.NewColumnRef("users", "id"),

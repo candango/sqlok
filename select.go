@@ -21,30 +21,169 @@ var (
 	ErrEmptySelectColumn    = errors.New("select criterion column cannot be empty")
 	ErrUnmappedSelectColumn = errors.New("select criterion column is not mapped")
 	ErrEmptySelectCriteria  = errors.New("select requires at least one criterion")
-	ErrNilSelectValue       = errors.New("equality criteria do not support NULL values yet")
+	ErrNilSelectValue       = errors.New("comparison criteria do not support NULL values; use IsNull or IsNotNull")
 	ErrNoSelectRows         = errors.New("select query returned no rows")
 	ErrMultipleSelectRows   = errors.New("select query returned more than one row")
 )
 
-// SelectCriterion is a predicate accepted by SelectQuery.Where.
-// Construct criteria with comparison functions such as Eq.
-type SelectCriterion struct {
-	column string
-	value  any
-	err    error
+type selectCriterionOperator uint8
+
+const (
+	selectCriterionEqual selectCriterionOperator = iota
+	selectCriterionNotEqual
+	selectCriterionGreaterThan
+	selectCriterionGreaterThanOrEqual
+	selectCriterionLessThan
+	selectCriterionLessThanOrEqual
+	selectCriterionIsNull
+	selectCriterionIsNotNull
+)
+
+func (operator selectCriterionOperator) isNull() bool {
+	return operator == selectCriterionIsNull || operator == selectCriterionIsNotNull
 }
 
-// Eq creates a bound equality criterion for a mapped database column. Nil
-// values are rejected until NULL predicates are available.
+func (operator selectCriterionOperator) comparison() sst.ComparisonOperator {
+	switch operator {
+	case selectCriterionNotEqual:
+		return sst.NotEqual
+	case selectCriterionGreaterThan:
+		return sst.GreaterThan
+	case selectCriterionGreaterThanOrEqual:
+		return sst.GreaterThanOrEqual
+	case selectCriterionLessThan:
+		return sst.LessThan
+	case selectCriterionLessThanOrEqual:
+		return sst.LessThanOrEqual
+	default:
+		return sst.Equal
+	}
+}
+
+func (operator selectCriterionOperator) nullOperator() sst.NullOperator {
+	if operator == selectCriterionIsNotNull {
+		return sst.IsNotNull
+	}
+	return sst.IsNull
+}
+
+func (operator selectCriterionOperator) planPart() string {
+	switch operator {
+	case selectCriterionNotEqual:
+		return "ne"
+	case selectCriterionGreaterThan:
+		return "gt"
+	case selectCriterionGreaterThanOrEqual:
+		return "gte"
+	case selectCriterionLessThan:
+		return "lt"
+	case selectCriterionLessThanOrEqual:
+		return "lte"
+	case selectCriterionIsNull:
+		return "is-null"
+	case selectCriterionIsNotNull:
+		return "is-not-null"
+	default:
+		return "eq"
+	}
+}
+
+type selectCriterionError uint8
+
+const (
+	selectCriterionNoError selectCriterionError = iota
+	selectCriterionEmptyColumn
+	selectCriterionNilValue
+)
+
+func (criterionError selectCriterionError) error() error {
+	switch criterionError {
+	case selectCriterionEmptyColumn:
+		return ErrEmptySelectColumn
+	case selectCriterionNilValue:
+		return ErrNilSelectValue
+	default:
+		return nil
+	}
+}
+
+// SelectCriterion is a predicate accepted by SelectQuery.Where.
+// Construct criteria with comparison functions such as Eq or null predicates
+// such as IsNull.
+type SelectCriterion struct {
+	column   string
+	value    any
+	operator selectCriterionOperator
+	err      selectCriterionError
+}
+
+// Eq creates a bound equality criterion for a mapped database column.
 func Eq(column string, value any) SelectCriterion {
+	return comparisonCriterion(column, selectCriterionEqual, value)
+}
+
+// Ne creates a bound not-equal criterion for a mapped database column.
+func Ne(column string, value any) SelectCriterion {
+	return comparisonCriterion(column, selectCriterionNotEqual, value)
+}
+
+// Gt creates a bound greater-than criterion for a mapped database column.
+func Gt(column string, value any) SelectCriterion {
+	return comparisonCriterion(column, selectCriterionGreaterThan, value)
+}
+
+// Gte creates a bound greater-than-or-equal criterion for a mapped database
+// column.
+func Gte(column string, value any) SelectCriterion {
+	return comparisonCriterion(column, selectCriterionGreaterThanOrEqual, value)
+}
+
+// Lt creates a bound less-than criterion for a mapped database column.
+func Lt(column string, value any) SelectCriterion {
+	return comparisonCriterion(column, selectCriterionLessThan, value)
+}
+
+// Lte creates a bound less-than-or-equal criterion for a mapped database
+// column.
+func Lte(column string, value any) SelectCriterion {
+	return comparisonCriterion(column, selectCriterionLessThanOrEqual, value)
+}
+
+// IsNull creates an IS NULL criterion for a mapped database column.
+func IsNull(column string) SelectCriterion {
+	return nullCriterion(column, selectCriterionIsNull)
+}
+
+// IsNotNull creates an IS NOT NULL criterion for a mapped database column.
+func IsNotNull(column string) SelectCriterion {
+	return nullCriterion(column, selectCriterionIsNotNull)
+}
+
+func comparisonCriterion(
+	column string,
+	operator selectCriterionOperator,
+	value any,
+) SelectCriterion {
 	column = strings.TrimSpace(column)
 	if column == "" {
-		return SelectCriterion{err: ErrEmptySelectColumn}
+		return SelectCriterion{err: selectCriterionEmptyColumn}
 	}
 	if isNilSelectValue(value) {
-		return SelectCriterion{err: ErrNilSelectValue}
+		return SelectCriterion{err: selectCriterionNilValue}
 	}
-	return SelectCriterion{column: column, value: value}
+	return SelectCriterion{
+		column:   column,
+		value:    value,
+		operator: operator,
+	}
+}
+
+func nullCriterion(column string, operator selectCriterionOperator) SelectCriterion {
+	column = strings.TrimSpace(column)
+	if column == "" {
+		return SelectCriterion{err: selectCriterionEmptyColumn}
+	}
+	return SelectCriterion{column: column, operator: operator}
 }
 
 func isNilSelectValue(value any) bool {
@@ -249,6 +388,9 @@ func (q SelectQuery[T]) rows(
 	}
 	arguments := plan.NewArgumentBuffer()
 	for position, criterion := range q.criteria {
+		if criterion.operator.isNull() {
+			continue
+		}
 		if err := arguments.Set(selectWhereSlotName(position), criterion.value); err != nil {
 			return nil, fmt.Errorf("bind SELECT criterion: %w", err)
 		}
@@ -320,9 +462,15 @@ func buildSelectStatement(
 		return nil, err
 	}
 	for position, criterion := range criteria {
-		statement.Where(sst.Eq(
-			sst.NewColumnRef(descriptor.table, criterion.column),
+		column := sst.NewColumnRef(descriptor.table, criterion.column)
+		if criterion.operator.isNull() {
+			statement.Where(sst.NewNullExpression(column, criterion.operator.nullOperator()))
+			continue
+		}
+		statement.Where(sst.NewBinaryExpression(
+			column,
 			sst.NewNamedParameterSlot(selectWhereSlotName(position)),
+			criterion.operator.comparison(),
 		))
 	}
 	if limit != nil {
@@ -339,8 +487,8 @@ func validateSelectCriteria(
 	criteria []SelectCriterion,
 ) error {
 	for _, criterion := range criteria {
-		if criterion.err != nil {
-			return criterion.err
+		if err := criterion.err.error(); err != nil {
+			return err
 		}
 		if !descriptorHasColumn(descriptor, criterion.column) {
 			return fmt.Errorf("%w: %q on %s", ErrUnmappedSelectColumn, criterion.column, descriptor.typ)
@@ -369,6 +517,7 @@ func selectPlanID(
 	writeSelectPlanPart(&shape, descriptor.typ.Name())
 	for _, criterion := range criteria {
 		writeSelectPlanPart(&shape, criterion.column)
+		writeSelectPlanPart(&shape, criterion.operator.planPart())
 	}
 	if limit != nil {
 		shape.WriteString("/limit:")

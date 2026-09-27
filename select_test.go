@@ -107,6 +107,106 @@ func TestSelectWhereIsGenerativeAndCombinesCriteria(t *testing.T) {
 	assert.Empty(t, queries[1].args)
 }
 
+func TestSelectSupportsComparisonAndNullCriteria(t *testing.T) {
+	tests := []struct {
+		name        string
+		criteria    []SelectCriterion
+		expectedSQL string
+		args        []driver.NamedValue
+	}{
+		{
+			name:        "not equal",
+			criteria:    []SelectCriterion{Ne("id", 7)},
+			expectedSQL: "SELECT test_user.id, test_user.name FROM test_user WHERE test_user.id <> ?",
+			args:        []driver.NamedValue{{Ordinal: 1, Value: int64(7)}},
+		},
+		{
+			name:        "greater than",
+			criteria:    []SelectCriterion{Gt("id", 7)},
+			expectedSQL: "SELECT test_user.id, test_user.name FROM test_user WHERE test_user.id > ?",
+			args:        []driver.NamedValue{{Ordinal: 1, Value: int64(7)}},
+		},
+		{
+			name:        "greater than or equal",
+			criteria:    []SelectCriterion{Gte("id", 7)},
+			expectedSQL: "SELECT test_user.id, test_user.name FROM test_user WHERE test_user.id >= ?",
+			args:        []driver.NamedValue{{Ordinal: 1, Value: int64(7)}},
+		},
+		{
+			name:        "less than",
+			criteria:    []SelectCriterion{Lt("id", 7)},
+			expectedSQL: "SELECT test_user.id, test_user.name FROM test_user WHERE test_user.id < ?",
+			args:        []driver.NamedValue{{Ordinal: 1, Value: int64(7)}},
+		},
+		{
+			name:        "less than or equal",
+			criteria:    []SelectCriterion{Lte("id", 7)},
+			expectedSQL: "SELECT test_user.id, test_user.name FROM test_user WHERE test_user.id <= ?",
+			args:        []driver.NamedValue{{Ordinal: 1, Value: int64(7)}},
+		},
+		{
+			name:        "is null",
+			criteria:    []SelectCriterion{IsNull("name")},
+			expectedSQL: "SELECT test_user.id, test_user.name FROM test_user WHERE test_user.name IS NULL",
+		},
+		{
+			name:        "is not null",
+			criteria:    []SelectCriterion{IsNotNull("name")},
+			expectedSQL: "SELECT test_user.id, test_user.name FROM test_user WHERE test_user.name IS NOT NULL",
+		},
+		{
+			name: "null and bound criteria",
+			criteria: []SelectCriterion{
+				IsNotNull("name"),
+				Eq("id", 7),
+			},
+			expectedSQL: "SELECT test_user.id, test_user.name FROM test_user WHERE test_user.name IS NOT NULL AND test_user.id = ?",
+			args:        []driver.NamedValue{{Ordinal: 1, Value: int64(7)}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newSessionTestDB(t, sessionTestResponse{
+				columns: []string{"id", "name"},
+				rows:    [][]driver.Value{{int64(7), "Ana"}},
+			})
+			session := NewSession(db)
+			_, err := Select(TestUser{}).Where(tt.criteria...).All(context.Background(), session)
+			require.NoError(t, err)
+
+			queries := sessionTestQueries()
+			require.Len(t, queries, 1)
+			assert.Equal(t, tt.expectedSQL, queries[0].query)
+			assert.Equal(t, tt.args, queries[0].args)
+		})
+	}
+}
+
+func TestSelectPredicateOperatorsUseDistinctPreparedPlans(t *testing.T) {
+	db := newSessionTestDB(t, sessionTestResponse{
+		columns: []string{"id", "name"},
+		rows:    [][]driver.Value{{int64(7), "Ana"}},
+	})
+	session := NewSession(db)
+
+	_, err := Select(TestUser{}).Where(Eq("id", 7)).All(context.Background(), session)
+	require.NoError(t, err)
+
+	setSessionTestResponse(sessionTestResponse{
+		columns: []string{"id", "name"},
+		rows:    [][]driver.Value{{int64(7), "Ana"}},
+	})
+	_, err = Select(TestUser{}).Where(Gt("id", 7)).All(context.Background(), session)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, session.readPlans.Len())
+	queries := sessionTestQueries()
+	require.Len(t, queries, 2)
+	assert.Equal(t, "SELECT test_user.id, test_user.name FROM test_user WHERE test_user.id = ?", queries[0].query)
+	assert.Equal(t, "SELECT test_user.id, test_user.name FROM test_user WHERE test_user.id > ?", queries[1].query)
+}
+
 func TestSelectOneOrNoneEnforcesCardinality(t *testing.T) {
 	t.Run("one row", func(t *testing.T) {
 		db := newSessionTestDB(t, sessionTestResponse{

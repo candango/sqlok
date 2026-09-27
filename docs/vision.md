@@ -65,12 +65,13 @@ user, err := sqlok.Select(User{}).
     OneOrNone(ctx, session)
 ```
 
-`User{}` is a Go type witness; its field values are not read. `Eq` takes a
-mapped database-column name and binds the value. `All`, `One`, and `OneOrNone`
-return typed mapped entities, and the Session reuses tracked pointers through
-its Identity Map. `OneOrNone` limits execution to two rows to detect
-non-uniqueness. Typed field descriptors and richer expression operators remain
-WIP; this first slice is not the final ergonomics contract.
+`User{}` is a Go type witness; its field values are not read. `Eq`, `Ne`, `Gt`,
+`Gte`, `Lt`, and `Lte` take a mapped database-column name and bind a non-NULL
+value. `IsNull` and `IsNotNull` render NULL predicates without binds. `All`,
+`One`, and `OneOrNone` return typed mapped entities, and the Session reuses
+tracked pointers through its Identity Map. `OneOrNone` limits execution to two
+rows to detect non-uniqueness. Typed field descriptors, membership/range/
+pattern predicates, and richer expression composition remain WIP.
 
 The required experience is:
 
@@ -303,6 +304,7 @@ The implemented ORM slice is:
 
 ```text
 Select(T{}).Where(Eq(column, value)).All/One/OneOrNone(ctx, Session)
+Select(T{}).Where(IsNull(column)).All/One/OneOrNone(ctx, Session)
   → typed entity SELECT AST
   → Session-private prepared read-plan reuse
   → Executor.Query
@@ -349,11 +351,11 @@ product target remains SQLAlchemy-like developer ergonomics:
 | Engine / Connection | application-owned `database/sql` handles through `Executor` |
 | Declarative models | future Go structs, tags, and generic APIs rather than runtime class machinery |
 
-SQLok follows SQLAlchemy's productive application workflow. The current Go
-1.24 floor uses explicit `Eq(column, value)` criteria and typed query methods
-instead of overloaded field operators or generic methods on Session. These are
-specific language-version adaptations, not reasons to weaken the SQLAlchemy
-reference. Relationship loading, cascades, and events remain WIP.
+SQLok follows SQLAlchemy's productive application workflow. The current Go 1.24 floor uses explicit mapped-column predicate functions
+(`Eq`, `Ne`, `Gt`, `Gte`, `Lt`, `Lte`, `IsNull`, and `IsNotNull`) and typed query
+methods instead of overloaded field operators or generic methods on Session.
+These are specific language-version adaptations, not reasons to weaken the
+SQLAlchemy reference. Relationship loading, cascades, and events remain WIP.
 
 ## Current package boundaries
 

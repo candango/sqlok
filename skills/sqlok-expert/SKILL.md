@@ -58,7 +58,7 @@ Preserve the operation model and call-site ergonomics in Go. Keep the current `g
 
 ### WIP — remaining SQLAlchemy-like workflow
 
-- Typed field descriptors and richer composable predicates beyond equality by mapped column name; NULL predicates are not implemented, so `Eq` rejects nil values.
+- Public mapped-column predicates support equality, inequality, ordering, `IsNull`, and `IsNotNull`; NULL comparison values remain rejected, so callers use explicit NULL predicates. Typed field descriptors and richer predicate composition beyond these criteria are WIP.
 - Projected/scalar row result shapes, reads bound to caller transactions, and SQLAlchemy-style autoflush before queries.
 - Session Unit-of-Work DELETE and the target transaction lifecycle.
 - Batch query and relation loading.
