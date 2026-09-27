@@ -16,14 +16,16 @@ import (
 )
 
 var (
-	ErrNilSelectQuery       = errors.New("select query cannot be nil")
-	ErrNilSelectContext     = errors.New("select context cannot be nil")
-	ErrEmptySelectColumn    = errors.New("select criterion column cannot be empty")
-	ErrUnmappedSelectColumn = errors.New("select criterion column is not mapped")
-	ErrEmptySelectCriteria  = errors.New("select requires at least one criterion")
-	ErrNilSelectValue       = errors.New("comparison criteria do not support NULL values; use IsNull or IsNotNull")
-	ErrNoSelectRows         = errors.New("select query returned no rows")
-	ErrMultipleSelectRows   = errors.New("select query returned more than one row")
+	ErrNilSelectQuery         = errors.New("select query cannot be nil")
+	ErrNilSelectContext       = errors.New("select context cannot be nil")
+	ErrEmptySelectColumn      = errors.New("select criterion column cannot be empty")
+	ErrUnmappedSelectColumn   = errors.New("select criterion column is not mapped")
+	ErrEmptySelectCriteria    = errors.New("select requires at least one criterion")
+	ErrEmptySelectProjection  = errors.New("select projection requires at least one mapped column")
+	ErrNilSelectValue         = errors.New("comparison criteria do not support NULL values; use IsNull or IsNotNull")
+	ErrNoSelectRows           = errors.New("select query returned no rows")
+	ErrMultipleSelectRows     = errors.New("select query returned more than one row")
+	ErrScalarSelectProjection = errors.New("scalar SELECT requires exactly one projected column")
 )
 
 type selectCriterionOperator uint8
@@ -209,6 +211,42 @@ type SelectQuery[T any] struct {
 	err        error
 }
 
+// SelectProjection is a mapped-column SELECT query that returns rows or scalar
+// values instead of entities.
+type SelectProjection struct {
+	descriptor *mapperDescriptor
+	columns    []string
+	criteria   []SelectCriterion
+	err        error
+}
+
+// SelectRow contains one projected result row in requested column order.
+type SelectRow struct {
+	columns []string
+	values  []any
+}
+
+// Columns returns the projected column names in result order.
+func (r SelectRow) Columns() []string {
+	return append([]string(nil), r.columns...)
+}
+
+// Values returns the projected values in column order.
+func (r SelectRow) Values() []any {
+	return append([]any(nil), r.values...)
+}
+
+// Value returns one projected value by mapped column name.
+func (r SelectRow) Value(column string) (any, bool) {
+	column = strings.TrimSpace(column)
+	for position, name := range r.columns {
+		if name == column {
+			return r.values[position], true
+		}
+	}
+	return nil, false
+}
+
 // Select starts a typed entity query. The entity value supplies T; its fields
 // are not read. For example: Select(User{}).Where(Eq("name", "Ana")).
 func Select[T any](_ T) SelectQuery[T] {
@@ -218,6 +256,27 @@ func Select[T any](_ T) SelectQuery[T] {
 		return query
 	}
 	return query
+}
+
+// Columns starts a mapped-column projection from the entity query.
+func (q SelectQuery[T]) Columns(columns ...string) SelectProjection {
+	projection := SelectProjection{
+		descriptor: q.descriptor,
+		criteria:   append([]SelectCriterion(nil), q.criteria...),
+		err:        q.err,
+	}
+	if projection.err != nil {
+		return projection
+	}
+	if projection.descriptor == nil {
+		projection.err = ErrNilSelectQuery
+		return projection
+	}
+	projection.columns, projection.err = validateSelectProjection(
+		projection.descriptor,
+		columns,
+	)
+	return projection
 }
 
 // Where returns a new SELECT query with the criteria combined using AND.
@@ -231,19 +290,41 @@ func (q SelectQuery[T]) Where(criteria ...SelectCriterion) SelectQuery[T] {
 	}
 
 	next := q
-	if len(criteria) == 0 {
-		next.err = ErrEmptySelectCriteria
-		return next
+	next.criteria, next.err = appendSelectCriteria(q.descriptor, q.criteria, criteria)
+	return next
+}
+
+// Where returns a new projection query with criteria combined using AND.
+func (q SelectProjection) Where(criteria ...SelectCriterion) SelectProjection {
+	if q.err != nil {
+		return q
+	}
+	if q.descriptor == nil {
+		q.err = ErrNilSelectQuery
+		return q
 	}
 
-	next.criteria = make([]SelectCriterion, 0, len(q.criteria)+len(criteria))
-	next.criteria = append(next.criteria, q.criteria...)
-	next.criteria = append(next.criteria, criteria...)
-	if err := validateSelectCriteria(next.descriptor, next.criteria); err != nil {
-		next.err = err
-		return next
-	}
+	next := q
+	next.criteria, next.err = appendSelectCriteria(q.descriptor, q.criteria, criteria)
 	return next
+}
+
+func appendSelectCriteria(
+	descriptor *mapperDescriptor,
+	current []SelectCriterion,
+	criteria []SelectCriterion,
+) ([]SelectCriterion, error) {
+	if len(criteria) == 0 {
+		return nil, ErrEmptySelectCriteria
+	}
+
+	next := make([]SelectCriterion, 0, len(current)+len(criteria))
+	next = append(next, current...)
+	next = append(next, criteria...)
+	if err := validateSelectCriteria(descriptor, next); err != nil {
+		return nil, err
+	}
+	return next, nil
 }
 
 // All executes the SELECT through session, maps every row to T, and reuses
@@ -258,7 +339,7 @@ func (q SelectQuery[T]) All(
 	if q.descriptor == nil {
 		return nil, ErrNilSelectQuery
 	}
-	planID := selectPlanID(q.descriptor, q.criteria, nil)
+	planID := selectPlanID(q.descriptor, nil, q.criteria, nil)
 	rows, err := q.rows(ctx, session, planID, nil)
 	if err != nil {
 		return nil, err
@@ -281,6 +362,77 @@ func (q SelectQuery[T]) All(
 	return entities, nil
 }
 
+// All executes the projection and returns rows in the requested column order.
+func (q SelectProjection) All(
+	ctx context.Context,
+	session *Session,
+) ([]SelectRow, error) {
+	if q.err != nil {
+		return nil, q.err
+	}
+	if q.descriptor == nil {
+		return nil, ErrNilSelectQuery
+	}
+	planID := selectPlanID(q.descriptor, q.columns, q.criteria, nil)
+	rows, err := queryRows(ctx, session, q.descriptor, q.columns, q.criteria, planID, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]SelectRow, 0)
+	for rows.Next() {
+		row, err := scanSelectRow(rows, q.columns)
+		if err != nil {
+			return nil, closeSelectRows(rows, err)
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, closeSelectRows(rows, fmt.Errorf("iterate projected SELECT rows: %w", err))
+	}
+	if err := closeSelectRows(rows, nil); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// Scalars executes a single-column projection and returns its values.
+func (q SelectProjection) Scalars(
+	ctx context.Context,
+	session *Session,
+) ([]any, error) {
+	if q.err != nil {
+		return nil, q.err
+	}
+	if q.descriptor == nil {
+		return nil, ErrNilSelectQuery
+	}
+	if len(q.columns) != 1 {
+		return nil, ErrScalarSelectProjection
+	}
+	planID := selectPlanID(q.descriptor, q.columns, q.criteria, nil)
+	rows, err := queryRows(ctx, session, q.descriptor, q.columns, q.criteria, planID, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	values := make([]any, 0)
+	for rows.Next() {
+		var value any
+		if err := rows.Scan(&value); err != nil {
+			return nil, closeSelectRows(rows, fmt.Errorf("scan scalar SELECT value: %w", err))
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, closeSelectRows(rows, fmt.Errorf("iterate scalar SELECT rows: %w", err))
+	}
+	if err := closeSelectRows(rows, nil); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
 // OneOrNone returns the sole matching entity, or nil when there are no matches.
 // It reads at most two rows to detect a non-unique result.
 func (q SelectQuery[T]) OneOrNone(
@@ -294,7 +446,7 @@ func (q SelectQuery[T]) OneOrNone(
 		return nil, ErrNilSelectQuery
 	}
 	limit := 2
-	planID := selectPlanID(q.descriptor, q.criteria, &limit)
+	planID := selectPlanID(q.descriptor, nil, q.criteria, &limit)
 	rows, err := q.rows(ctx, session, planID, &limit)
 	if err != nil {
 		return nil, err
@@ -347,6 +499,21 @@ type selectRows interface {
 	Close() error
 }
 
+func scanSelectRow(rows selectRows, columns []string) (SelectRow, error) {
+	values := make([]any, len(columns))
+	destinations := make([]any, len(values))
+	for position := range values {
+		destinations[position] = &values[position]
+	}
+	if err := rows.Scan(destinations...); err != nil {
+		return SelectRow{}, fmt.Errorf("scan projected SELECT row: %w", err)
+	}
+	return SelectRow{
+		columns: append([]string(nil), columns...),
+		values:  values,
+	}, nil
+}
+
 func closeSelectRows(rows selectRows, primary error) error {
 	closeErr := rows.Close()
 	if closeErr == nil {
@@ -365,6 +532,18 @@ func (q SelectQuery[T]) rows(
 	planID compiler.PlanID,
 	limit *int,
 ) (selectRows, error) {
+	return queryRows(ctx, session, q.descriptor, nil, q.criteria, planID, limit)
+}
+
+func queryRows(
+	ctx context.Context,
+	session *Session,
+	descriptor *mapperDescriptor,
+	columns []string,
+	criteria []SelectCriterion,
+	planID compiler.PlanID,
+	limit *int,
+) (selectRows, error) {
 	if ctx == nil {
 		return nil, ErrNilSelectContext
 	}
@@ -377,7 +556,7 @@ func (q SelectQuery[T]) rows(
 
 	plan, found := session.readPlans.Get(planID)
 	if !found {
-		statement, err := buildSelectStatement(q.descriptor, q.criteria, limit)
+		statement, err := buildSelectStatement(descriptor, columns, criteria, limit)
 		if err != nil {
 			return nil, fmt.Errorf("build SELECT query: %w", err)
 		}
@@ -387,7 +566,7 @@ func (q SelectQuery[T]) rows(
 		}
 	}
 	arguments := plan.NewArgumentBuffer()
-	for position, criterion := range q.criteria {
+	for position, criterion := range criteria {
 		if criterion.operator.isNull() {
 			continue
 		}
@@ -445,6 +624,7 @@ func (q SelectQuery[T]) scanEntity(scanner Scanner, session *Session) (*T, error
 
 func buildSelectStatement(
 	descriptor *mapperDescriptor,
+	selectedColumns []string,
 	criteria []SelectCriterion,
 	limit *int,
 ) (*dql.SelectStatement, error) {
@@ -452,9 +632,9 @@ func buildSelectStatement(
 		return nil, errors.New("select mapper cannot be nil")
 	}
 
-	columns := make([]sst.ExpressionNode, len(descriptor.fields))
-	for position, field := range descriptor.fields {
-		columns[position] = sst.NewColumnRef(descriptor.table, field.column)
+	columns, err := selectProjectionExpressions(descriptor, selectedColumns)
+	if err != nil {
+		return nil, err
 	}
 	statement := dql.Select(columns...).From(sst.NewTableRef(descriptor.table))
 
@@ -480,6 +660,52 @@ func buildSelectStatement(
 		return nil, err
 	}
 	return statement, nil
+}
+
+func validateSelectProjection(
+	descriptor *mapperDescriptor,
+	columns []string,
+) ([]string, error) {
+	if len(columns) == 0 {
+		return nil, ErrEmptySelectProjection
+	}
+
+	normalized := make([]string, 0, len(columns))
+	for _, column := range columns {
+		column = strings.TrimSpace(column)
+		if column == "" {
+			return nil, ErrEmptySelectColumn
+		}
+		if !descriptorHasColumn(descriptor, column) {
+			return nil, fmt.Errorf("%w: %q on %s", ErrUnmappedSelectColumn, column, descriptor.typ)
+		}
+		normalized = append(normalized, column)
+	}
+	return normalized, nil
+}
+
+func selectProjectionExpressions(
+	descriptor *mapperDescriptor,
+	selectedColumns []string,
+) ([]sst.ExpressionNode, error) {
+	if selectedColumns == nil {
+		selectedColumns = make([]string, 0, len(descriptor.fields))
+		for _, field := range descriptor.fields {
+			selectedColumns = append(selectedColumns, field.column)
+		}
+	} else {
+		var err error
+		selectedColumns, err = validateSelectProjection(descriptor, selectedColumns)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	columns := make([]sst.ExpressionNode, len(selectedColumns))
+	for position, column := range selectedColumns {
+		columns[position] = sst.NewColumnRef(descriptor.table, column)
+	}
+	return columns, nil
 }
 
 func validateSelectCriteria(
@@ -508,6 +734,7 @@ func descriptorHasColumn(descriptor *mapperDescriptor, column string) bool {
 
 func selectPlanID(
 	descriptor *mapperDescriptor,
+	selectedColumns []string,
 	criteria []SelectCriterion,
 	limit *int,
 ) compiler.PlanID {
@@ -515,6 +742,12 @@ func selectPlanID(
 	shape.WriteString("orm.select")
 	writeSelectPlanPart(&shape, descriptor.typ.PkgPath())
 	writeSelectPlanPart(&shape, descriptor.typ.Name())
+	if selectedColumns != nil {
+		writeSelectPlanPart(&shape, "projection")
+		for _, column := range selectedColumns {
+			writeSelectPlanPart(&shape, column)
+		}
+	}
 	for _, criterion := range criteria {
 		writeSelectPlanPart(&shape, criterion.column)
 		writeSelectPlanPart(&shape, criterion.operator.planPart())

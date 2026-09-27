@@ -183,6 +183,74 @@ func TestSelectSupportsComparisonAndNullCriteria(t *testing.T) {
 	}
 }
 
+func TestSelectProjectionReturnsRowsInRequestedColumnOrder(t *testing.T) {
+	db := newSessionTestDB(t, sessionTestResponse{
+		columns: []string{"name", "id"},
+		rows:    [][]driver.Value{{"Ana", int64(7)}},
+	})
+
+	rows, err := Select(TestUser{}).
+		Where(Eq("id", 7)).
+		Columns("name", "id").
+		All(context.Background(), NewSession(db))
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, []string{"name", "id"}, rows[0].Columns())
+	assert.Equal(t, []any{"Ana", int64(7)}, rows[0].Values())
+	value, ok := rows[0].Value("name")
+	assert.True(t, ok)
+	assert.Equal(t, "Ana", value)
+	_, ok = rows[0].Value("missing")
+	assert.False(t, ok)
+
+	queries := sessionTestQueries()
+	require.Len(t, queries, 1)
+	assert.Equal(t, "SELECT test_user.name, test_user.id FROM test_user WHERE test_user.id = ?", queries[0].query)
+	assert.Equal(t, []driver.NamedValue{{Ordinal: 1, Value: int64(7)}}, queries[0].args)
+}
+
+func TestSelectProjectionScalarsRequiresOneColumn(t *testing.T) {
+	t.Run("returns scalar values", func(t *testing.T) {
+		db := newSessionTestDB(t, sessionTestResponse{
+			columns: []string{"name"},
+			rows:    [][]driver.Value{{"Ana"}, {"Bia"}},
+		})
+
+		values, err := Select(TestUser{}).
+			Columns("name").
+			Scalars(context.Background(), NewSession(db))
+		require.NoError(t, err)
+		assert.Equal(t, []any{"Ana", "Bia"}, values)
+
+		queries := sessionTestQueries()
+		require.Len(t, queries, 1)
+		assert.Equal(t, "SELECT test_user.name FROM test_user", queries[0].query)
+	})
+
+	t.Run("rejects multiple columns", func(t *testing.T) {
+		db := newSessionTestDB(t, sessionTestResponse{
+			columns: []string{"id", "name"},
+		})
+		_, err := Select(TestUser{}).
+			Columns("id", "name").
+			Scalars(context.Background(), NewSession(db))
+		assert.ErrorIs(t, err, ErrScalarSelectProjection)
+		assert.Empty(t, sessionTestQueries())
+	})
+}
+
+func TestSelectProjectionValidation(t *testing.T) {
+	query := Select(TestUser{})
+	_, err := query.Columns().All(context.Background(), NewSession(nil))
+	assert.ErrorIs(t, err, ErrEmptySelectProjection)
+
+	_, err = query.Columns("missing").All(context.Background(), NewSession(nil))
+	assert.ErrorIs(t, err, ErrUnmappedSelectColumn)
+
+	_, err = query.Columns(" ").All(context.Background(), NewSession(nil))
+	assert.ErrorIs(t, err, ErrEmptySelectColumn)
+}
+
 func TestSelectPredicateOperatorsUseDistinctPreparedPlans(t *testing.T) {
 	db := newSessionTestDB(t, sessionTestResponse{
 		columns: []string{"id", "name"},

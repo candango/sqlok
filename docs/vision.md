@@ -63,6 +63,14 @@ users, err := sqlok.Select(User{}).
 user, err := sqlok.Select(User{}).
     Where(sqlok.Eq("id", userID)).
     OneOrNone(ctx, session)
+
+rows, err := sqlok.Select(User{}).
+    Columns("id", "name").
+    All(ctx, session)
+
+names, err := sqlok.Select(User{}).
+    Columns("name").
+    Scalars(ctx, session)
 ```
 
 `User{}` is a Go type witness; its field values are not read. `Eq`, `Ne`, `Gt`,
@@ -70,8 +78,10 @@ user, err := sqlok.Select(User{}).
 value. `IsNull` and `IsNotNull` render NULL predicates without binds. `All`,
 `One`, and `OneOrNone` return typed mapped entities, and the Session reuses
 tracked pointers through its Identity Map. `OneOrNone` limits execution to two
-rows to detect non-uniqueness. Typed field descriptors, membership/range/
-pattern predicates, and richer expression composition remain WIP.
+rows to detect non-uniqueness. `Columns(...).All(...)` returns `SelectRow`
+values, and `Columns(one).Scalars(...)` returns `[]any`. Typed field
+descriptors, membership/range/pattern predicates, and richer expression
+composition remain WIP.
 
 The required experience is:
 
@@ -305,7 +315,8 @@ The implemented ORM slice is:
 ```text
 Select(T{}).Where(Eq(column, value)).All/One/OneOrNone(ctx, Session)
 Select(T{}).Where(IsNull(column)).All/One/OneOrNone(ctx, Session)
-  → typed entity SELECT AST
+Select(T{}).Columns(column...).All/Scalars(ctx, Session)
+  → typed entity or projected SELECT AST
   → Session-private prepared read-plan reuse
   → Executor.Query
   → Mapper.Scan

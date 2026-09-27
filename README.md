@@ -94,10 +94,24 @@ func rename(ctx context.Context, db *sql.DB, id int, name string) error {
 ```
 
 `Select(User{})` uses the value only as a Go type witness. Results are mapped
-and tracked in the Session Identity Map. Composite-key queries use ordinary
-criteria, for example `Where(Eq("tenant_id", 7), Eq("user_id", 11))`; NULL
-queries use `Where(IsNull("deleted_at"))`; no `CompositeKey` value is exposed.
-Session writes remain caller-transactional:
+and tracked in the Session Identity Map. For mapped-column projections, use
+`Columns(...).All(...)` for `SelectRow` values or `Columns(one).Scalars(...)`
+for a single scalar column:
+
+```go
+rows, err := sqlok.Select(User{}).
+  Columns("id", "name").
+  Where(sqlok.IsNotNull("name")).
+  All(ctx, session)
+values, err := sqlok.Select(User{}).
+  Columns("name").
+  Scalars(ctx, session)
+```
+
+`SelectRow` exposes `Columns`, `Values`, and `Value(column)`. Composite-key
+queries use ordinary criteria, for example `Where(Eq("tenant_id", 7),
+Eq("user_id", 11))`; NULL queries use `Where(IsNull("deleted_at"))`; no
+`CompositeKey` value is exposed. Session writes remain caller-transactional:
 `Flush` never begins, commits, or rolls back a transaction. SELECT currently
 uses the Session's `*sql.DB` and does not autoflush pending/dirty entities;
 transaction-bound reads and autoflush remain WIP.
