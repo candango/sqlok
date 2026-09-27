@@ -54,13 +54,13 @@ Preserve the operation model and call-site ergonomics in Go. Keep the current `g
 - `Mapper[T]` supports struct metadata, row scanning, and value extraction.
 - `sqlok.Select(User{}).Where(sqlok.Eq("name", "Ana"))` builds a typed entity query. `All`, `One`, and `OneOrNone` execute through Session, map rows, reuse Identity Map pointers, and use Session-private prepared read plans. Values are bound; `OneOrNone` limits reads to two rows.
 - `sqlok.Select(User{}).Columns("name").All(...)` returns mapped-column `SelectRow` values, and a single projected column supports `Scalars(...)` returning `[]any`. Projection columns are mapped database-column names and preserve requested order.
-- `Session.Add` and `Session.Flush(ctx, tx)` support pending INSERTs and dirty UPDATEs. Flush receives a caller-owned transaction. Generated-key support covers one numeric generated primary key.
+- `Session.Add` and `Session.Flush(ctx, tx)` support pending INSERTs and dirty UPDATEs. `Session.BindTransaction(tx)` binds reads to the caller-owned transaction and autoflushes pending or dirty entities before SELECT execution; `UnbindTransaction` is explicit. Generated-key support covers one numeric generated primary key.
 - `LoadContext`, `Load`, and public `CompositeKey` were removed from core. Composite identity queries use one equality criterion per mapped key column.
 
 ### WIP — remaining SQLAlchemy-like workflow
 
 - Public mapped-column predicates support equality, inequality, ordering, `IsNull`, and `IsNotNull`; NULL comparison values remain rejected, so callers use explicit NULL predicates. Typed field descriptors and richer predicate composition beyond these criteria are WIP.
-- Reads bound to caller transactions and SQLAlchemy-style autoflush before queries.
+- The Session transaction lifecycle remains caller-owned; it does not begin, commit, or roll back transactions automatically.
 - Session Unit-of-Work DELETE and the target transaction lifecycle.
 - Batch query and relation loading.
 - Migrate the separately owned `sqlok-sqlite-modernc` E2E suite from its pinned legacy core API to public SELECT; do not edit that repository unless the active task explicitly includes it.

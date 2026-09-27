@@ -251,6 +251,89 @@ func TestSelectProjectionValidation(t *testing.T) {
 	assert.ErrorIs(t, err, ErrEmptySelectColumn)
 }
 
+func TestSelectBoundTransactionAutoflushesPendingEntity(t *testing.T) {
+	db := newSessionTestDB(t, sessionTestResponse{
+		columns:      []string{"id", "name"},
+		rows:         [][]driver.Value{{int64(7), "Ana"}},
+		lastInsertID: 7,
+	})
+	session := NewSession(db)
+	entity := &TestUser{Name: "Ana"}
+	require.NoError(t, session.Add(entity))
+
+	tx, err := db.BeginTx(context.Background(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	require.NoError(t, session.BindTransaction(tx))
+	t.Cleanup(session.UnbindTransaction)
+
+	loaded, err := Select(TestUser{}).
+		Where(Eq("name", "Ana")).
+		OneOrNone(context.Background(), session)
+	require.NoError(t, err)
+	assert.Same(t, entity, loaded)
+	assert.Empty(t, session.pending)
+
+	execs := sessionTestExecs()
+	require.Len(t, execs, 1)
+	assert.Equal(t, "INSERT INTO test_user (name) VALUES (?)", execs[0].query)
+	queries := sessionTestQueries()
+	require.Len(t, queries, 1)
+	assert.Contains(t, queries[0].query, "SELECT test_user.id, test_user.name")
+}
+
+func TestSelectBoundTransactionAutoflushesDirtyEntity(t *testing.T) {
+	db := newSessionTestDB(t, sessionTestResponse{
+		columns: []string{"id", "name"},
+		rows:    [][]driver.Value{{int64(7), "Bia"}},
+	})
+	session := NewSession(db)
+	entity := &TestUser{TestUserBase: TestUserBase{Id: 7}, Name: "Ana"}
+	require.NoError(t, session.Add(entity))
+	entity.Name = "Bia"
+
+	tx, err := db.BeginTx(context.Background(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	require.NoError(t, session.BindTransaction(tx))
+	t.Cleanup(session.UnbindTransaction)
+
+	loaded, err := Select(TestUser{}).
+		Where(Eq("id", 7)).
+		OneOrNone(context.Background(), session)
+	require.NoError(t, err)
+	assert.Same(t, entity, loaded)
+
+	execs := sessionTestExecs()
+	require.Len(t, execs, 1)
+	assert.Equal(t, "UPDATE test_user SET name = ? WHERE test_user.id = ?", execs[0].query)
+	assert.Equal(t, []driver.NamedValue{
+		{Ordinal: 1, Value: "Bia"},
+		{Ordinal: 2, Value: int64(7)},
+	}, execs[0].args)
+}
+
+func TestSessionBindTransactionValidation(t *testing.T) {
+	var session *Session
+	assert.ErrorIs(t, session.BindTransaction(nil), ErrNilSession)
+
+	session = NewSession(nil)
+	assert.ErrorIs(t, session.BindTransaction(nil), ErrNilSessionTransaction)
+
+	db := newSessionTestDB(t, sessionTestResponse{})
+	tx, err := db.BeginTx(context.Background(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	require.NoError(t, session.BindTransaction(tx))
+
+	otherTx, err := db.BeginTx(context.Background(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = otherTx.Rollback() })
+	assert.ErrorIs(t, session.BindTransaction(otherTx), ErrSessionTransactionAlreadyBound)
+	session.UnbindTransaction()
+	assert.NoError(t, session.BindTransaction(otherTx))
+}
+
 func TestSelectPredicateOperatorsUseDistinctPreparedPlans(t *testing.T) {
 	db := newSessionTestDB(t, sessionTestResponse{
 		columns: []string{"id", "name"},

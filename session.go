@@ -39,6 +39,13 @@ var (
 	// ErrNilFlushTransaction reports a Flush call without a caller-owned tx.
 	ErrNilFlushTransaction = errors.New("session flush transaction cannot be nil")
 
+	// ErrNilSessionTransaction reports binding a nil transaction to a Session.
+	ErrNilSessionTransaction = errors.New("session transaction cannot be nil")
+
+	// ErrSessionTransactionAlreadyBound reports replacing an active transaction
+	// binding without first unbinding it.
+	ErrSessionTransactionAlreadyBound = errors.New("session transaction is already bound")
+
 	// ErrPrimaryKeyMutation reports a tracked object whose identity changed.
 	ErrPrimaryKeyMutation = errors.New("tracked entity primary key changed")
 
@@ -54,6 +61,9 @@ var (
 type Session struct {
 	// db is the underlying SQL database connection.
 	db *sql.DB
+
+	// tx is the caller-owned transaction used for bound reads and autoflush.
+	tx *sql.Tx
 
 	// readCache and readPlans hold Session-private prepared read plans. They
 	// keep compiler plumbing out of the ORM facade and do not own a global cache.
@@ -87,6 +97,47 @@ func NewSession(db *sql.DB) *Session {
 		identityMap: make(map[reflect.Type]map[any]any),
 		snapshots:   make(map[any]map[string]fieldSnapshot),
 	}
+}
+
+// BindTransaction binds a caller-owned transaction to the Session. Bound reads
+// use the transaction and autoflush pending or dirty entities before querying.
+func (s *Session) BindTransaction(tx *sql.Tx) error {
+	if s == nil {
+		return ErrNilSession
+	}
+	if tx == nil {
+		return ErrNilSessionTransaction
+	}
+	if s.tx != nil && s.tx != tx {
+		return ErrSessionTransactionAlreadyBound
+	}
+	s.tx = tx
+	return nil
+}
+
+// UnbindTransaction removes the caller-owned transaction from the Session.
+// It never commits or rolls back the transaction.
+func (s *Session) UnbindTransaction() {
+	if s == nil {
+		return
+	}
+	s.tx = nil
+}
+
+func (s *Session) selectExecutor(ctx context.Context) (executor.Executor, error) {
+	if s == nil {
+		return nil, ErrNilSession
+	}
+	if s.tx != nil {
+		if err := s.Flush(ctx, s.tx); err != nil {
+			return nil, fmt.Errorf("autoflush session before SELECT: %w", err)
+		}
+		return s.tx, nil
+	}
+	if s.db == nil {
+		return nil, ErrNilSessionDatabase
+	}
+	return s.db, nil
 }
 
 // Add registers an entity into the session's identity map.

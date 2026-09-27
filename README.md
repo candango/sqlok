@@ -112,9 +112,11 @@ values, err := sqlok.Select(User{}).
 queries use ordinary criteria, for example `Where(Eq("tenant_id", 7),
 Eq("user_id", 11))`; NULL queries use `Where(IsNull("deleted_at"))`; no
 `CompositeKey` value is exposed. Session writes remain caller-transactional:
-`Flush` never begins, commits, or rolls back a transaction. SELECT currently
-uses the Session's `*sql.DB` and does not autoflush pending/dirty entities;
-transaction-bound reads and autoflush remain WIP.
+`Flush` never begins, commits, or rolls back a transaction. An unbound Session
+reads through its `*sql.DB` without autoflush. Call `session.BindTransaction(tx)`
+to make SELECTs use a caller-owned `*sql.Tx` and autoflush pending or dirty
+entities before reading; call `UnbindTransaction` after the transaction ends.
+The caller still owns commit and rollback.
 
 The legacy query builder and schema loader remain repository-internal.
 

@@ -329,8 +329,10 @@ Session.Flush(ctx, tx)
 ```
 
 `LoadContext` and `Load` have been removed; primary-key and composite-key
-lookups use normal SELECT criteria. The caller still owns `tx`; Session does
-not begin, commit, or roll back it.
+lookups use normal SELECT criteria. `Session.BindTransaction(tx)` binds reads
+to a caller-owned transaction and autoflushes pending or dirty entities before
+SELECT execution. The caller still owns `tx`; Session does not begin, commit,
+roll back, or unbind it automatically.
 
 ## Research basis
 

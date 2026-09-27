@@ -550,8 +550,9 @@ func queryRows(
 	if session == nil {
 		return nil, ErrNilSession
 	}
-	if session.db == nil {
-		return nil, ErrNilSessionDatabase
+	target, err := session.selectExecutor(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	plan, found := session.readPlans.Get(planID)
@@ -586,7 +587,7 @@ func queryRows(
 		}
 	}
 
-	rows, err := executor.Query(ctx, session.db, plan, arguments)
+	rows, err := executor.Query(ctx, target, plan, arguments)
 	if err != nil {
 		return nil, fmt.Errorf("query selected entities: %w", err)
 	}
