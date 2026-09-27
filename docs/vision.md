@@ -301,7 +301,7 @@ it does not decide whether an entity is dirty.
 The Session owns execution-scoped ORM state and coordination:
 
 - Identity Map registration and reuse;
-- pending entities;
+- pending entities and entities marked for deletion;
 - snapshots or field fingerprints used for dirty checking;
 - load/query orchestration through prepared plans and an Executor;
 - flush planning and explicit transaction coordination.
@@ -322,17 +322,22 @@ Select(T{}).Columns(column...).All/Scalars(ctx, Session)
   → Mapper.Scan
   → Identity Map reuse/registration and snapshot
 
+Session.Delete(entity)
+  → mark a tracked entity for DELETE
+  → discard pending INSERTs without a statement
+
 Session.Flush(ctx, tx)
   → INSERT pending entities
   → UPDATE dirty tracked entities
-  → refresh snapshots after successful statements
+  → DELETE marked entities
+  → refresh snapshots and detach deleted entities after successful statements
 ```
 
 `LoadContext` and `Load` have been removed; primary-key and composite-key
 lookups use normal SELECT criteria. `Session.BindTransaction(tx)` binds reads
-to a caller-owned transaction and autoflushes pending or dirty entities before
-SELECT execution. The caller still owns `tx`; Session does not begin, commit,
-roll back, or unbind it automatically.
+to a caller-owned transaction and autoflushes pending, dirty, or deleted
+entities before SELECT execution. The caller still owns `tx`; Session does not
+begin, commit, roll back, or unbind it automatically.
 
 ## Research basis
 

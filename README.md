@@ -23,7 +23,7 @@ Identity Map reuse, and explicit transactional flushing.
 - **Compiler** - Structural validation, bind layouts, shape identities, and SQL rendering
 - **Compiled Plans** - Bounded statement cache and stable `PlanRegistry` warm path
 - **Driver-Agnostic Execution** - `database/sql`-compatible executor boundary
-- **Mapper and Session** - Typed SELECT queries, struct mapping, Identity Map reuse, INSERT/UPDATE flushing, and numeric generated keys via `LastInsertId`
+- **Mapper and Session** - Typed SELECT queries, struct mapping, Identity Map reuse, INSERT/UPDATE/DELETE flushing, and numeric generated keys via `LastInsertId`
 - **Schema Management** - Internal table, field, and foreign-key definitions
 - **Legacy Query Builder** - Internal fluent string builder pending consolidation
 - **CLI Interface** - Schema inspection and example-generation commands
@@ -112,11 +112,13 @@ values, err := sqlok.Select(User{}).
 queries use ordinary criteria, for example `Where(Eq("tenant_id", 7),
 Eq("user_id", 11))`; NULL queries use `Where(IsNull("deleted_at"))`; no
 `CompositeKey` value is exposed. Session writes remain caller-transactional:
-`Flush` never begins, commits, or rolls back a transaction. An unbound Session
-reads through its `*sql.DB` without autoflush. Call `session.BindTransaction(tx)`
-to make SELECTs use a caller-owned `*sql.Tx` and autoflush pending or dirty
-entities before reading; call `UnbindTransaction` after the transaction ends.
-The caller still owns commit and rollback.
+`Flush` never begins, commits, or rolls back a transaction. `session.Delete(entity)`
+marks a tracked entity for DELETE; pending inserts are discarded without a
+statement, and successfully flushed deletes detach the entity from the
+Identity Map. An unbound Session reads through its `*sql.DB` without autoflush. Call `session.BindTransaction(tx)` to make SELECTs use a caller-owned `*sql.Tx`
+and autoflush pending, dirty, or deleted entities before reading; call
+`session.UnbindTransaction` after the transaction ends. The caller still owns
+commit and rollback.
 
 The legacy query builder and schema loader remain repository-internal.
 

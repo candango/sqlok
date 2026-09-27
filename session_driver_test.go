@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const sessionTestDriverName = "sqlok-session-test"
@@ -373,5 +374,142 @@ func TestSessionFlushWritesPendingAndDirtyEntities(t *testing.T) {
 		session := NewSession(nil)
 		assert.ErrorIs(t, session.Flush(nil, nil), ErrNilFlushContext)
 		assert.ErrorIs(t, session.Flush(context.Background(), nil), ErrNilFlushTransaction)
+	})
+}
+
+func TestSessionDeleteWritesDeleteAndDetaches(t *testing.T) {
+	db := newSessionTestDB(t, sessionTestResponse{})
+	session := NewSession(db)
+	user := &TestUser{TestUserBase: TestUserBase{Id: 7}, Name: "Ana"}
+	require.NoError(t, session.Add(user))
+	require.NoError(t, session.Delete(user))
+	assert.Contains(t, session.deleted, user)
+
+	tx, err := db.BeginTx(context.Background(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	require.NoError(t, session.Flush(context.Background(), tx))
+
+	assert.Empty(t, session.deleted)
+	assert.Empty(t, session.deleteIdentities)
+	assert.Empty(t, session.identityMap)
+	assert.NotContains(t, session.snapshots, user)
+
+	execs := sessionTestExecs()
+	require.Len(t, execs, 1)
+	assert.Equal(t, "DELETE FROM test_user WHERE test_user.id = ?", execs[0].query)
+	assert.Equal(t, []driver.NamedValue{
+		{Ordinal: 1, Value: int64(7)},
+	}, execs[0].args)
+}
+
+func TestSessionDeletePendingEntitySkipsDatabase(t *testing.T) {
+	db := newSessionTestDB(t, sessionTestResponse{})
+	session := NewSession(db)
+	user := &TestUser{Name: "Pending"}
+	require.NoError(t, session.Add(user))
+	require.NoError(t, session.Delete(user))
+
+	assert.Empty(t, session.pending)
+	assert.Empty(t, session.deleted)
+
+	tx, err := db.BeginTx(context.Background(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	require.NoError(t, session.Flush(context.Background(), tx))
+	assert.Empty(t, sessionTestExecs())
+}
+
+func TestSessionDeleteSkipsDirtyUpdateAndSupportsCompositeKeys(t *testing.T) {
+	t.Run("delete wins over dirty update", func(t *testing.T) {
+		db := newSessionTestDB(t, sessionTestResponse{})
+		session := NewSession(db)
+		user := &TestUser{TestUserBase: TestUserBase{Id: 7}, Name: "Ana"}
+		require.NoError(t, session.Add(user))
+		user.Name = "Bia"
+		require.NoError(t, session.Delete(user))
+
+		tx, err := db.BeginTx(context.Background(), nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = tx.Rollback() })
+		require.NoError(t, session.Flush(context.Background(), tx))
+
+		execs := sessionTestExecs()
+		require.Len(t, execs, 1)
+		assert.Equal(t, "DELETE FROM test_user WHERE test_user.id = ?", execs[0].query)
+	})
+
+	t.Run("composite primary key", func(t *testing.T) {
+		db := newSessionTestDB(t, sessionTestResponse{})
+		session := NewSession(db)
+		entity := &TestCompositeUser{OrgId: 2, UserId: 7, Name: "Ana"}
+		require.NoError(t, session.Add(entity))
+		require.NoError(t, session.Delete(entity))
+
+		tx, err := db.BeginTx(context.Background(), nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = tx.Rollback() })
+		require.NoError(t, session.Flush(context.Background(), tx))
+
+		execs := sessionTestExecs()
+		require.Len(t, execs, 1)
+		assert.Equal(t,
+			"DELETE FROM test_composite_user WHERE test_composite_user.org_id = ? AND test_composite_user.user_id = ?",
+			execs[0].query,
+		)
+		assert.Equal(t, []driver.NamedValue{
+			{Ordinal: 1, Value: int64(2)},
+			{Ordinal: 2, Value: int64(7)},
+		}, execs[0].args)
+	})
+}
+
+func TestSessionDeleteValidationAndFailurePreserveState(t *testing.T) {
+	t.Run("untracked entity", func(t *testing.T) {
+		session := NewSession(nil)
+		err := session.Delete(&TestUser{TestUserBase: TestUserBase{Id: 7}})
+		assert.ErrorIs(t, err, ErrEntityNotTracked)
+	})
+
+	t.Run("primary key mutation", func(t *testing.T) {
+		db := newSessionTestDB(t, sessionTestResponse{})
+		session := NewSession(db)
+		user := &TestUser{TestUserBase: TestUserBase{Id: 7}, Name: "Ana"}
+		require.NoError(t, session.Add(user))
+		require.NoError(t, session.Delete(user))
+		user.Id = 8
+
+		tx, err := db.BeginTx(context.Background(), nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = tx.Rollback() })
+		assert.ErrorIs(t, session.Flush(context.Background(), tx), ErrPrimaryKeyMutation)
+		assert.Empty(t, sessionTestExecs())
+		assert.Contains(t, session.deleted, user)
+	})
+
+	t.Run("write failure", func(t *testing.T) {
+		db := newSessionTestDB(t, sessionTestResponse{
+			execErr: errors.New("delete failed"),
+		})
+		session := NewSession(db)
+		user := &TestUser{TestUserBase: TestUserBase{Id: 7}, Name: "Ana"}
+		require.NoError(t, session.Add(user))
+		require.NoError(t, session.Delete(user))
+
+		tx, err := db.BeginTx(context.Background(), nil)
+		require.NoError(t, err)
+		assert.Error(t, session.Flush(context.Background(), tx))
+		assert.Contains(t, session.deleted, user)
+		assert.Contains(t, session.snapshots, user)
+		assert.Same(t, user, session.identityMap[reflect.TypeFor[TestUser]()][7])
+		require.NoError(t, tx.Rollback())
+
+		setSessionTestResponse(sessionTestResponse{})
+		nextTx, err := db.BeginTx(context.Background(), nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = nextTx.Rollback() })
+		require.NoError(t, session.Flush(context.Background(), nextTx))
+		assert.Empty(t, session.deleted)
+		assert.Empty(t, session.identityMap)
 	})
 }

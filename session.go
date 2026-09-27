@@ -54,6 +54,10 @@ var (
 	ErrGeneratedKeyUnsupported = errors.New(
 		"generated primary key is unsupported by the executor",
 	)
+
+	// ErrEntityNotTracked reports deleting an entity that is not managed by the
+	// Session identity map or pending queue.
+	ErrEntityNotTracked = errors.New("entity is not tracked by session")
 )
 
 // Session represents the Unit of Work. It tracks object states and
@@ -84,18 +88,24 @@ type Session struct {
 
 	// pending holds new objects that have been Added but not yet Inserted into the DB.
 	pending []any
+
+	// deleted holds persistent objects marked for DELETE at the next Flush.
+	// deleteIdentities preserves the identity captured when Delete was called.
+	deleted          []any
+	deleteIdentities map[any]any
 }
 
 // NewSession initializes a new Unit of Work with empty state and private read/write plans.
 func NewSession(db *sql.DB) *Session {
 	return &Session{
-		db:          db,
-		readCache:   compiler.NewStatementCache(),
-		readPlans:   compiler.NewPlanRegistry(),
-		flushCache:  compiler.NewStatementCache(),
-		flushPlans:  compiler.NewPlanRegistry(),
-		identityMap: make(map[reflect.Type]map[any]any),
-		snapshots:   make(map[any]map[string]fieldSnapshot),
+		db:               db,
+		readCache:        compiler.NewStatementCache(),
+		readPlans:        compiler.NewPlanRegistry(),
+		flushCache:       compiler.NewStatementCache(),
+		flushPlans:       compiler.NewPlanRegistry(),
+		identityMap:      make(map[reflect.Type]map[any]any),
+		snapshots:        make(map[any]map[string]fieldSnapshot),
+		deleteIdentities: make(map[any]any),
 	}
 }
 
@@ -179,6 +189,76 @@ func (s *Session) Add(ent any) error {
 	return nil
 }
 
+// Delete marks a tracked entity for deletion at the next Flush. Pending
+// inserts are removed without issuing a DELETE statement.
+func (s *Session) Delete(entity any) error {
+	if s == nil {
+		return ErrNilSession
+	}
+
+	descriptor, root, err := mapperDescriptorForEntity(entity)
+	if err != nil {
+		return fmt.Errorf("map session entity for delete: %w", err)
+	}
+	if s.isDeleted(entity) {
+		return nil
+	}
+	if s.removePending(entity) {
+		delete(s.snapshots, entity)
+		return nil
+	}
+
+	identity, present, err := descriptor.loadedPrimaryKey(root)
+	if err != nil {
+		return fmt.Errorf("read session entity primary key for delete: %w", err)
+	}
+	if !present {
+		return fmt.Errorf("%w: %s", ErrNoPrimaryKey, descriptor.typ)
+	}
+	tracked, found := s.identityMap[descriptor.typ][identity]
+	if !found || tracked != entity {
+		return fmt.Errorf("%w: %s", ErrEntityNotTracked, descriptor.typ)
+	}
+
+	if s.deleteIdentities == nil {
+		s.deleteIdentities = make(map[any]any)
+	}
+	s.deleted = append(s.deleted, entity)
+	s.deleteIdentities[entity] = identity
+	return nil
+}
+
+func (s *Session) isDeleted(entity any) bool {
+	if s == nil || s.deleteIdentities == nil {
+		return false
+	}
+	_, found := s.deleteIdentities[entity]
+	return found
+}
+
+func (s *Session) removePending(entity any) bool {
+	if len(s.pending) == 0 {
+		return false
+	}
+
+	found := false
+	remaining := s.pending[:0]
+	for _, candidate := range s.pending {
+		if candidate == entity {
+			found = true
+			continue
+		}
+		remaining = append(remaining, candidate)
+	}
+	if found {
+		s.pending = remaining
+		if len(s.pending) == 0 {
+			s.pending = nil
+		}
+	}
+	return found
+}
+
 func (s *Session) registerIdentity(
 	entity any,
 	entityType reflect.Type,
@@ -237,6 +317,9 @@ func (s *Session) Flush(ctx context.Context, tx *sql.Tx) error {
 	if err != nil {
 		return err
 	}
+	if err := s.flushDeleted(ctx, tx); err != nil {
+		return err
+	}
 	if err := s.registerPendingEntities(); err != nil {
 		return err
 	}
@@ -253,6 +336,7 @@ func (s *Session) Flush(ctx context.Context, tx *sql.Tx) error {
 	for entity, snapshot := range dirtySnapshots {
 		s.snapshots[entity] = snapshot
 	}
+	s.finalizeDeleted()
 	return nil
 }
 
@@ -378,6 +462,9 @@ func (s *Session) flushDirty(
 	snapshots := make(map[any]map[string]fieldSnapshot)
 	for entityType, entities := range s.identityMap {
 		for identity, entity := range entities {
+			if s.isDeleted(entity) {
+				continue
+			}
 			descriptor, root, err := mapperDescriptorForEntity(entity)
 			if err != nil {
 				return nil, fmt.Errorf("map persistent session entity: %w", err)
@@ -412,6 +499,66 @@ func (s *Session) flushDirty(
 		}
 	}
 	return snapshots, nil
+}
+
+func (s *Session) flushDeleted(ctx context.Context, tx *sql.Tx) error {
+	for _, entity := range s.deleted {
+		descriptor, root, err := mapperDescriptorForEntity(entity)
+		if err != nil {
+			return fmt.Errorf("map deleted session entity: %w", err)
+		}
+		expectedIdentity, found := s.deleteIdentities[entity]
+		if !found {
+			return fmt.Errorf("%w: %s", ErrEntityNotTracked, descriptor.typ)
+		}
+		identity, present, err := descriptor.loadedPrimaryKey(root)
+		if err != nil {
+			return fmt.Errorf("read deleted entity primary key: %w", err)
+		}
+		if !present || !reflect.DeepEqual(identity, expectedIdentity) {
+			return fmt.Errorf("%w: %s", ErrPrimaryKeyMutation, descriptor.typ)
+		}
+		tracked, trackedFound := s.identityMap[descriptor.typ][expectedIdentity]
+		if !trackedFound || tracked != entity {
+			return fmt.Errorf("%w: %s", ErrEntityNotTracked, descriptor.typ)
+		}
+
+		values := descriptor.mappedValues(root)
+		plan, err := s.deletePlan(descriptor)
+		if err != nil {
+			return err
+		}
+		arguments, err := bindDeleteValues(plan, values)
+		if err != nil {
+			return err
+		}
+		if _, err := executor.Exec(ctx, tx, plan, arguments); err != nil {
+			return fmt.Errorf("delete session entity: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Session) finalizeDeleted() {
+	for _, entity := range s.deleted {
+		identity, found := s.deleteIdentities[entity]
+		if !found {
+			continue
+		}
+		descriptor, _, err := mapperDescriptorForEntity(entity)
+		if err == nil {
+			entities := s.identityMap[descriptor.typ]
+			if entities != nil && entities[identity] == entity {
+				delete(entities, identity)
+				if len(entities) == 0 {
+					delete(s.identityMap, descriptor.typ)
+				}
+			}
+		}
+		delete(s.snapshots, entity)
+		delete(s.deleteIdentities, entity)
+	}
+	s.deleted = nil
 }
 
 func mapperDescriptorForEntity(entity any) (*mapperDescriptor, reflect.Value, error) {
@@ -484,6 +631,67 @@ func (s *Session) insertPlan(
 	if err := s.flushPlans.Put(planID, plan); err != nil {
 		return compiler.CompiledStatement{}, fmt.Errorf(
 			"register session insert plan: %w",
+			err,
+		)
+	}
+	return plan, nil
+}
+
+func (s *Session) deletePlan(
+	descriptor *mapperDescriptor,
+) (compiler.CompiledStatement, error) {
+	if s.flushPlans == nil {
+		s.flushPlans = compiler.NewPlanRegistry()
+	}
+	if s.flushCache == nil {
+		s.flushCache = compiler.NewStatementCache()
+	}
+
+	planID := compiler.PlanID(fmt.Sprintf(
+		"orm.flush.delete.%s.%s",
+		descriptor.typ.PkgPath(),
+		descriptor.typ.Name(),
+	))
+	if plan, found := s.flushPlans.Get(planID); found {
+		return plan, nil
+	}
+
+	statement := dml.Delete(sst.NewTableRef(descriptor.table))
+	predicates := make([]sst.ExpressionNode, len(descriptor.primaryFields))
+	for position, fieldPosition := range descriptor.primaryFields {
+		field := descriptor.fields[fieldPosition]
+		predicates[position] = sst.Eq(
+			sst.NewColumnRef(descriptor.table, field.column),
+			sst.NewNamedParameterSlot(primarySlotName(position)),
+		)
+	}
+	if len(predicates) == 0 {
+		return compiler.CompiledStatement{}, fmt.Errorf(
+			"build session delete plan: %w: %s",
+			ErrNoPrimaryKey,
+			descriptor.typ,
+		)
+	}
+	where := predicates[0]
+	if len(predicates) > 1 {
+		where = sst.And(predicates...)
+	}
+	statement.Where(where)
+
+	plan, err := compiler.Prepare(
+		s.flushCache,
+		statement,
+		dialect.NewDefaultDialect(),
+	)
+	if err != nil {
+		return compiler.CompiledStatement{}, fmt.Errorf(
+			"prepare session delete plan: %w",
+			err,
+		)
+	}
+	if err := s.flushPlans.Put(planID, plan); err != nil {
+		return compiler.CompiledStatement{}, fmt.Errorf(
+			"register session delete plan: %w",
 			err,
 		)
 	}
@@ -583,6 +791,27 @@ func bindInsertValues(
 			return nil, fmt.Errorf("bind session insert value: %w", err)
 		}
 		position++
+	}
+	return arguments, nil
+}
+
+func bindDeleteValues(
+	plan compiler.CompiledStatement,
+	values []MappedValue,
+) (*compiler.ArgumentBuffer, error) {
+	arguments := plan.NewArgumentBuffer()
+	primaryPosition := 0
+	for _, value := range values {
+		if !value.Primary {
+			continue
+		}
+		if err := arguments.Set(primarySlotName(primaryPosition), value.Value); err != nil {
+			return nil, fmt.Errorf("bind session delete primary key: %w", err)
+		}
+		primaryPosition++
+	}
+	if primaryPosition == 0 {
+		return nil, fmt.Errorf("bind session delete values: %w", ErrNoPrimaryKey)
 	}
 	return arguments, nil
 }
